@@ -1,6 +1,8 @@
-// DarkPicturesRT: a ReShade add-on for the game's ray tracing console variables.
-// Phase 1 test build: the census and snapshots of phase 0, plus overlay toggles that set
-// cvars through IConsoleVariable::Set (see "overrides" and docs/FINDINGS.md).
+// DarkPicturesRT: a ReShade add-on that tunes the game's ray tracing through its console
+// variables, from an overlay tab with presets ("settings"), saved in ReShade.ini.
+// It also carries the investigation tools: the cvar census and snapshots, the ray tracing
+// pipeline log and DXIL dumps, and shader replacement (see "shader replacement" and
+// docs/FINDINGS.md).
 //
 // What it records, next to the game executable:
 //   DarkPicturesRT.log     every r.RayTracing* (and related) cvar the game has: how its
@@ -35,6 +37,7 @@
 #include <reshade.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
@@ -49,7 +52,7 @@
 
 extern "C" __declspec(dllexport) const char* NAME = DPRT_PRODUCT;
 extern "C" __declspec(dllexport) const char* DESCRIPTION =
-    "Ray tracing settings for " DPRT_GAMES " (DirectX 12). Test build: ray tracing cvar and pipeline probe, RT shadows test toggles.";
+    "Ray traced reflections, AO and shadows settings with presets for " DPRT_GAMES " (DirectX 12).";
 
 namespace {
 
@@ -303,22 +306,29 @@ void LogVtable(void* vtable) {
 }
 
 // First snapshot: the full census. Later ones: what changed since the previous one.
-void Snapshot() {
-    if (!g_manager) {
-        void** singleton = cvars::FindConsoleManagerSingleton(g_base);
+// Finds the console manager: the singleton's address once (a scan of .text), then waits
+// for the engine to create the manager. Called every frame until it succeeds.
+bool FindManager() {
+    static void** singleton = nullptr;
+    static bool searched = false;
+    if (g_manager) return true;
+    if (!searched) {
+        searched = true;
+        singleton = cvars::FindConsoleManagerSingleton(g_base);
         if (!singleton) {
             g_status = "IConsoleManager::Singleton not found";
             Log("cvars: %s (no lea of L\"r.ScreenPercentage\" after mov rcx,[rip+x])", g_status.c_str());
-            return;
         }
-        if (!*singleton) {
-            g_status = "console manager not created yet";
-            return;
-        }
-        g_manager = *singleton;
-        Log("cvars: IConsoleManager::Singleton at %s, manager %p, vtable %s", Where(singleton).c_str(), g_manager,
-            Where(*static_cast<void**>(g_manager)).c_str());
     }
+    if (!singleton || !*singleton) return false;
+    g_manager = *singleton;
+    Log("cvars: IConsoleManager::Singleton at %s, manager %p, vtable %s", Where(singleton).c_str(), g_manager,
+        Where(*static_cast<void**>(g_manager)).c_str());
+    return true;
+}
+
+void Snapshot() {
+    if (!FindManager()) return;
 
     std::vector<Cvar> now;
     for (const std::wstring& name : CollectNames()) {
@@ -390,46 +400,139 @@ void Snapshot() {
     g_status = buf;
 }
 
-// ---------------------------------------------------------------- overrides
+// ---------------------------------------------------------------- settings
 
-// A cvar the add-on sets through IConsoleVariable::Set at ECVF_SetByConsole, which
-// outranks the game's menu (GameSetting, 0x02) and ini defaults (ProjectSetting, 0x03),
-// so the game can't change it back. Set runs on ReShade's present thread, where the
-// engine skips the copy the renderer reads, so MirrorToRenderer does that part.
-// Releasing restores the original flags (priority) and value, so the game is in charge
-// again.
-struct Override {
-    const wchar_t* name;
+// Every control in the overlay is a Setting on one console variable. While a setting is
+// overridden, the add-on sets the cvar through IConsoleVariable::Set at
+// ECVF_SetByConsole, which outranks the game's menu (GameSetting, 0x02) and ini defaults
+// (ProjectSetting, 0x03), so the game can't change it back. Set runs on ReShade's present
+// thread, where the engine skips the copy the renderer reads, so MirrorToRenderer does
+// that part. Turning an override off restores the original flags (priority) and value,
+// so the game is in charge again. Overrides persist in ReShade.ini, section
+// [DarkPicturesRT], one key per cvar.
+
+enum class Kind { Toggle, Choice, Int, Float };
+
+struct Choice {
+    int value;
     const char* label;
-    const wchar_t* forced;  // value while on
-    bool want = false;      // overlay checkbox
-    bool active = false;    // forced right now
-    void* var = nullptr;
-    uint32_t originalFlags = 0;
-    std::wstring original;  // renderer's value before we forced it, as text
-    uint32_t repairs = 0;  // times CheckOverrides put the value back
 };
-// Test toggles. The first turns ray-traced shadows on; the rest find what blocks the
-// light when it is on (0.1.1 test: the key spotlight went dark everywhere). Light-type
-// toggles put that type back on shadow maps; geometry toggles drop that geometry from
-// the ray tracing scene (all effects, not only shadows).
-Override g_overrides[] = {
-    {L"r.RayTracing.Shadows", "Ray traced shadows (r.RayTracing.Shadows 1)", L"1"},
-    {L"r.RayTracing.Shadows.Lights.Spot", "  Spot lights on shadow maps (...Lights.Spot 0)", L"0"},
-    {L"r.RayTracing.Shadows.Lights.Point", "  Point lights on shadow maps (...Lights.Point 0)", L"0"},
-    {L"r.RayTracing.Shadows.Lights.Rect", "  Rect lights on shadow maps (...Lights.Rect 0)", L"0"},
-    {L"r.RayTracing.Shadows.Lights.Directional", "  Directional on shadow maps (...Lights.Directional 0)", L"0"},
-    {L"r.RayTracing.Shadows.EnableTwoSidedGeometry", "  Single-sided geometry (...EnableTwoSidedGeometry 0)", L"0"},
-    {L"r.RayTracing.Shadows.EnableMaterials", "  Masked materials as opaque (...EnableMaterials 0)", L"0"},
-    {L"r.RayTracing.Geometry.SkeletalMeshes", "  No skeletal meshes in RT scene (Geometry.SkeletalMeshes 0)", L"0"},
-    {L"r.RayTracing.Geometry.StaticMeshes", "  No static meshes in RT scene (Geometry.StaticMeshes 0)", L"0"},
-    {L"r.RayTracing.Geometry.StaticMeshes.WPO", "  Hide WPO static meshes in RT scene (StaticMeshes.WPO 0)", L"0"},
-    {L"r.RayTracing.Geometry.InstancedStaticMeshes", "  No instanced static meshes in RT scene (InstancedStaticMeshes 0)", L"0"},
-    {L"r.RayTracing.Geometry.NiagaraSprites", "  No Niagara sprites in RT scene (Geometry.NiagaraSprites 0)", L"0"},
-    {L"r.RayTracing.Geometry.NiagaraMeshes", "  No Niagara meshes in RT scene (Geometry.NiagaraMeshes 0)", L"0"},
-    // Skeletal meshes enter ray tracing only through the GPU skin cache; meshes that don't
-    // fit its per-scene budget (stock 128 MB) are left out of ray tracing silently.
-    {L"r.SkinCache.SceneMemoryLimitInMB", "  Skin cache budget 1024 MB (SkinCache.SceneMemoryLimitInMB)", L"1024"},
+
+struct Setting {
+    const char* group;
+    const wchar_t* cvar;
+    const char* label;
+    const char* help;
+    Kind kind;
+    float min = 0, max = 1;  // Int / Float range; Toggle: the value forced while ticked
+    std::vector<Choice> choices = {};
+    bool persist = true;  // diagnostics are session-only
+
+    bool overridden = false;  // the user wants this cvar forced
+    float value = 0;          // to this value
+    bool active = false;      // forced right now
+    float applied = 0;        // the value forced
+    void* var = nullptr;
+    bool missing = false;  // not a cvar in this build
+    std::wstring original;  // renderer's value before we forced it, as text
+    uint32_t originalFlags = 0;
+    uint32_t repairs = 0;  // times CheckSettings put the value back
+};
+
+std::vector<Setting> g_settings;
+bool g_settingsDirty = false;  // save to ReShade.ini on the next present
+
+void DefineSettings() {
+    const std::vector<Choice> gameOffOn = {{-1, "Post-process volume"}, {0, "Off"}, {1, "On"}};
+    const std::vector<Choice> denoiser = {{0, "Off"}, {1, "Engine default"}, {2, "Screen-space denoiser"}};
+    g_settings = {
+        // Reflections. The game runs UE's "experimental deferred" path (fast, subset of
+        // features); samples, bounces and shadows only apply to the standard path, which
+        // needs a denoiser (the game turns it off for the deferred path).
+        {"Reflections", L"r.RayTracing.Reflections", "Ray traced reflections",
+         "The game's menu sets this (RT Reflections). Overriding locks it.", Kind::Choice, 0, 0, gameOffOn},
+        {"Reflections", L"r.RayTracing.Reflections.ExperimentalDeferred", "Algorithm",
+         "Fast deferred (the game's choice) supports a subset of features. Standard supports samples, bounces and "
+         "shadows in reflections, and needs a denoiser.",
+         Kind::Choice, 0, 0, {{1, "Fast deferred"}, {0, "Standard"}}},
+        {"Reflections", L"r.RayTracing.Reflections.ScreenPercentage", "Resolution (%)",
+         "Percentage of the render resolution reflections are traced at. The game uses 25.", Kind::Float, 25, 100},
+        {"Reflections", L"r.RayTracing.Reflections.MaxRoughness", "Max roughness",
+         "Surfaces rougher than this use the fallback instead of traced reflections.", Kind::Float, 0, 1},
+        {"Reflections", L"r.Reflections.Denoiser", "Denoiser", "Needed by the standard algorithm.", Kind::Choice, 0, 0,
+         denoiser},
+        {"Reflections", L"r.RayTracing.Reflections.SamplesPerPixel", "Samples per pixel (standard)", nullptr, Kind::Int,
+         1, 4},
+        {"Reflections", L"r.RayTracing.Reflections.MaxBounces", "Bounces (standard)", nullptr, Kind::Int, 1, 4},
+        {"Reflections", L"r.RayTracing.Reflections.Shadows", "Shadows in reflections (standard)", nullptr, Kind::Choice,
+         0, 0, {{-1, "Post-process volume"}, {0, "Off"}, {1, "Hard"}, {2, "Soft (area)"}}},
+        {"Reflections", L"r.RayTracing.Reflections.ExperimentalDeferred.SpatialResolve", "Spatial resolve (deferred)",
+         "The deferred algorithm's own denoising filter.", Kind::Toggle, 1},
+
+        // Ambient occlusion: the game already enables RT AO through its settings.
+        {"Ambient occlusion", L"r.RayTracing.AmbientOcclusion", "Ray traced AO", nullptr, Kind::Choice, 0, 0, gameOffOn},
+        {"Ambient occlusion", L"r.RayTracing.AmbientOcclusion.SamplesPerPixel", "Samples per pixel",
+         "More samples, less noise, more cost.", Kind::Int, 1, 8},
+        {"Ambient occlusion", L"r.AmbientOcclusion.Denoiser", "Denoiser", nullptr, Kind::Choice, 0, 0, denoiser},
+        {"Ambient occlusion", L"r.RayTracing.AmbientOcclusion.EnableTwoSidedGeometry", "Two-sided geometry", nullptr,
+         Kind::Toggle, 1},
+
+        // Shadows: parked (docs/FINDINGS.md). Spot lights carry the game's key lighting and
+        // lose prop shadows (the mannequin's hat) under RT, so they stay on shadow maps.
+        {"Shadows (experimental)", L"r.RayTracing.Shadows", "Ray traced shadows",
+         "Experimental: props such as hats can lose their shadows under RT.", Kind::Toggle, 1},
+        {"Shadows (experimental)", L"r.RayTracing.Shadows.Lights.Spot", "Spot lights on shadow maps",
+         "Recommended with RT shadows: the game's key lights are spot lights.", Kind::Toggle, 0},
+
+        // Diagnostics: session-only test switches from the shadow investigation.
+        {"Diagnostics", L"r.RayTracing.Shadows.Lights.Point", "Point lights on shadow maps", nullptr, Kind::Toggle, 0, 1,
+         {}, false},
+        {"Diagnostics", L"r.RayTracing.Shadows.Lights.Rect", "Rect lights on shadow maps", nullptr, Kind::Toggle, 0, 1,
+         {}, false},
+        {"Diagnostics", L"r.RayTracing.Shadows.Lights.Directional", "Directional on shadow maps", nullptr, Kind::Toggle,
+         0, 1, {}, false},
+        {"Diagnostics", L"r.RayTracing.Shadows.EnableTwoSidedGeometry", "Shadows: single-sided geometry", nullptr,
+         Kind::Toggle, 0, 1, {}, false},
+        {"Diagnostics", L"r.RayTracing.Shadows.EnableMaterials", "Shadows: masked materials as opaque", nullptr,
+         Kind::Toggle, 0, 1, {}, false},
+        {"Diagnostics", L"r.RayTracing.Geometry.SkeletalMeshes", "No skeletal meshes in RT scene", nullptr,
+         Kind::Toggle, 0, 1, {}, false},
+        {"Diagnostics", L"r.RayTracing.Geometry.StaticMeshes", "No static meshes in RT scene", nullptr, Kind::Toggle, 0,
+         1, {}, false},
+        {"Diagnostics", L"r.SkinCache.SceneMemoryLimitInMB", "Skin cache budget 1024 MB", nullptr, Kind::Toggle, 1024,
+         1, {}, false},
+    };
+}
+
+// Presets set the non-diagnostic settings listed and clear the rest.
+struct Preset {
+    const char* name;
+    const char* help;
+    std::vector<std::pair<const wchar_t*, double>> values;
+};
+const Preset kPresets[] = {
+    {"Game default", "Everything back to the game's own values.", {}},
+    {"Sharper reflections", "The game's fast algorithm at twice the resolution.",
+     {{L"r.RayTracing.Reflections.ScreenPercentage", 50}}},
+    {"High",
+     "Standard reflections at full resolution with the screen-space denoiser and hard shadows; AO at 2 samples.",
+     {{L"r.RayTracing.Reflections.ExperimentalDeferred", 0},
+      {L"r.RayTracing.Reflections.ScreenPercentage", 100},
+      {L"r.Reflections.Denoiser", 2},
+      {L"r.RayTracing.Reflections.MaxRoughness", 0.6f},
+      {L"r.RayTracing.Reflections.SamplesPerPixel", 1},
+      {L"r.RayTracing.Reflections.MaxBounces", 1},
+      {L"r.RayTracing.Reflections.Shadows", 1},
+      {L"r.RayTracing.AmbientOcclusion.SamplesPerPixel", 2}}},
+    {"Ultra", "High with 2 bounces, 2 reflection samples, soft shadows in reflections, and AO at 4 samples.",
+     {{L"r.RayTracing.Reflections.ExperimentalDeferred", 0},
+      {L"r.RayTracing.Reflections.ScreenPercentage", 100},
+      {L"r.Reflections.Denoiser", 2},
+      {L"r.RayTracing.Reflections.MaxRoughness", 0.8f},
+      {L"r.RayTracing.Reflections.SamplesPerPixel", 2},
+      {L"r.RayTracing.Reflections.MaxBounces", 2},
+      {L"r.RayTracing.Reflections.Shadows", 2},
+      {L"r.RayTracing.AmbientOcclusion.SamplesPerPixel", 4}}},
 };
 
 bool IsFloat(void* var) { return cvars::AsData(var, true) != nullptr; }
@@ -469,50 +572,114 @@ std::string Live(void* var) {
     return buf;
 }
 
-void ApplyOverrides() {
+std::wstring ValueText(const Setting& s, float v) {
+    wchar_t buf[32];
+    if (s.kind == Kind::Float)
+        swprintf(buf, 32, L"%g", v);
+    else
+        swprintf(buf, 32, L"%d", static_cast<int>(lroundf(v)));
+    return buf;
+}
+
+// The value the setting should force while overridden.
+float Wanted(const Setting& s) { return s.kind == Kind::Toggle ? s.min : s.value; }
+
+bool Resolve(Setting& s) {
+    if (s.var || s.missing) return s.var != nullptr;
+    s.var = cvars::FindVariable(g_manager, s.cvar);
+    if (!s.var) {
+        s.missing = true;
+        Log("settings: %ls is not a cvar in this build", s.cvar);
+    }
+    return s.var != nullptr;
+}
+
+void ApplySettings() {
     if (!g_manager) return;
-    for (Override& o : g_overrides) {
-        if (o.want == o.active) continue;
-        if (!o.var) o.var = cvars::FindVariable(g_manager, o.name);
-        if (!o.var) {
-            Log("override: %ls not found", o.name);
-            o.want = false;
-            continue;
-        }
-        std::string before = Live(o.var);
-        if (o.want) {
-            o.originalFlags = cvars::Flags(o.var);
-            o.original = RenderText(o.var);  // what the renderer used before us
-            bool ok = cvars::Set(o.var, o.forced, cvars::kSetByConsole) && cvars::MirrorToRenderer(o.var);
-            Log("override: %ls = %ls%s: %s -> %s", o.name, o.forced, ok ? "" : " (Set or mirror failed)", before.c_str(),
-                Live(o.var).c_str());
-            o.active = ok;
-            if (!ok) o.want = false;
+    for (Setting& s : g_settings) {
+        bool want = s.overridden;
+        float v = Wanted(s);
+        if (want == s.active && (!want || v == s.applied)) continue;
+        if (!Resolve(s)) continue;
+        std::string before = Live(s.var);
+        if (want) {
+            if (!s.active) {  // first time: remember what the game had
+                s.originalFlags = cvars::Flags(s.var);
+                s.original = RenderText(s.var);
+            }
+            std::wstring text = ValueText(s, v);
+            bool ok = cvars::Set(s.var, text.c_str(), cvars::kSetByConsole) && cvars::MirrorToRenderer(s.var);
+            Log("settings: %ls = %ls%s: %s -> %s", s.cvar, text.c_str(), ok ? "" : " (Set or mirror failed)",
+                before.c_str(), Live(s.var).c_str());
+            s.active = ok;
+            s.applied = v;
+            if (!ok) s.overridden = false;
         } else {
             // Back to the game's priority first, or Set would refuse the lower one.
-            cvars::Flags(o.var) = o.originalFlags;
-            const wchar_t* value = o.original.c_str();
-            bool ok = cvars::Set(o.var, value, o.originalFlags & 0xff000000) && cvars::MirrorToRenderer(o.var);
-            Log("override: %ls released to %ls%s: %s -> %s", o.name, value, ok ? "" : " (Set or mirror failed)", before.c_str(),
-                Live(o.var).c_str());
-            o.active = false;
+            cvars::Flags(s.var) = s.originalFlags;
+            bool ok =
+                cvars::Set(s.var, s.original.c_str(), s.originalFlags & 0xff000000) && cvars::MirrorToRenderer(s.var);
+            Log("settings: %ls released to %ls%s: %s -> %s", s.cvar, s.original.c_str(),
+                ok ? "" : " (Set or mirror failed)", before.c_str(), Live(s.var).c_str());
+            s.active = false;
         }
     }
 }
 
 // Puts a forced value back if something changed it (it shouldn't, given the priority).
-// Logs the first few times per override.
-void CheckOverrides() {
-    for (Override& o : g_overrides) {
-        if (!o.active) continue;
-        std::wstring render = RenderText(o.var);
-        if (IsFloat(o.var) ? wcstof(render.c_str(), nullptr) == wcstof(o.forced, nullptr) : render == o.forced) continue;
-        if (++o.repairs <= 5)
-            Log("override: %ls changed behind our back: %s; setting it again%s", o.name, Live(o.var).c_str(),
-                o.repairs == 5 ? " (not logging further repairs)" : "");
-        cvars::Set(o.var, o.forced, cvars::kSetByConsole);
-        cvars::MirrorToRenderer(o.var);
+// Logs the first few times per setting.
+void CheckSettings() {
+    for (Setting& s : g_settings) {
+        if (!s.active) continue;
+        std::wstring render = RenderText(s.var);
+        std::wstring forced = ValueText(s, s.applied);
+        if (IsFloat(s.var) ? wcstof(render.c_str(), nullptr) == s.applied : render == forced) continue;
+        if (++s.repairs <= 5)
+            Log("settings: %ls changed behind our back: %s; setting it again%s", s.cvar, Live(s.var).c_str(),
+                s.repairs == 5 ? " (not logging further repairs)" : "");
+        cvars::Set(s.var, forced.c_str(), cvars::kSetByConsole);
+        cvars::MirrorToRenderer(s.var);
     }
+}
+
+std::string Narrow(const std::wstring& s) { return Narrow(s.c_str()); }
+
+void LoadSettings() {
+    int loaded = 0;
+    for (Setting& s : g_settings) {
+        if (!s.persist) continue;
+        char value[32] = "";
+        size_t size = sizeof(value);
+        if (!reshade::get_config_value(nullptr, DPRT_PRODUCT, Narrow(s.cvar).c_str(), value, &size) || !value[0] ||
+            strcmp(value, "game") == 0)
+            continue;
+        s.overridden = true;
+        s.value = static_cast<float>(atof(value));
+        ++loaded;
+    }
+    Log("settings: %d overrides loaded from ReShade.ini [" DPRT_PRODUCT "]", loaded);
+}
+
+void SaveSettings() {
+    for (const Setting& s : g_settings) {
+        if (!s.persist) continue;
+        std::string value = s.overridden ? Narrow(ValueText(s, Wanted(s))) : "game";
+        reshade::set_config_value(nullptr, DPRT_PRODUCT, Narrow(s.cvar).c_str(), value.c_str());
+    }
+}
+
+void ApplyPreset(const Preset& p) {
+    for (Setting& s : g_settings) {
+        if (!s.persist || strcmp(s.group, "Shadows (experimental)") == 0) continue;  // presets leave shadows alone
+        s.overridden = false;
+        for (auto& [cvar, v] : p.values)
+            if (wcscmp(cvar, s.cvar) == 0) {
+                s.overridden = true;
+                s.value = static_cast<float>(v);
+            }
+    }
+    g_settingsDirty = true;
+    Log("settings: preset \"%s\"", p.name);
 }
 
 // ---------------------------------------------------------------- ray tracing pipelines
@@ -939,24 +1106,120 @@ void OnPresent(command_queue*, swapchain*, const rect*, const rect*, uint32_t, c
         Snapshot();
         if (!g_textDumped) g_textDumped = DumpText();
     }
-    ApplyOverrides();
-    if (g_frames % 60 == 0) CheckOverrides();
+    if (FindManager()) {
+        ApplySettings();
+        if (g_frames % 60 == 0) CheckSettings();
+    }
+    if (g_settingsDirty) {
+        g_settingsDirty = false;
+        SaveSettings();
+    }
     StepCapture();
 }
 
-void DrawOverlay(effect_runtime*) {
-    std::lock_guard lock(g_mutex);
-    ImGui::TextUnformatted(DPRT_PRODUCT " " DPRT_VERSION " - test build");
-    ImGui::Text("Status: %s", g_frames < kCensusFrame ? "first census after 10 s" : g_status.c_str());
+// The game's current value of a setting's cvar, as a number (what it had before we forced
+// it, if we did).
+float GameValue(Setting& s) {
+    if (!g_manager || !Resolve(s)) return 0;
+    return static_cast<float>(wcstod((s.active ? s.original : RenderText(s.var)).c_str(), nullptr));
+}
 
-    ImGui::Separator();
-    if (!g_manager) ImGui::BeginDisabled();
-    for (Override& o : g_overrides) {
-        ImGui::Checkbox(o.label, &o.want);
-        if (o.var) ImGui::Text("    now: %s", Live(o.var).c_str());
+const char* ChoiceLabel(const Setting& s, int v) {
+    for (const Choice& c : s.choices)
+        if (c.value == v) return c.label;
+    return nullptr;
+}
+
+void DrawSetting(Setting& s) {
+    ImGui::PushID(&s);
+    float game = GameValue(s);
+    char gameText[48];
+    if (s.kind == Kind::Choice && ChoiceLabel(s, static_cast<int>(lroundf(game))))
+        snprintf(gameText, sizeof(gameText), "Game (%s)", ChoiceLabel(s, static_cast<int>(lroundf(game))));
+    else if (s.kind == Kind::Float)
+        snprintf(gameText, sizeof(gameText), "Game (%g)", game);
+    else
+        snprintf(gameText, sizeof(gameText), "Game (%d)", static_cast<int>(lroundf(game)));
+
+    bool changed = false;
+    switch (s.kind) {
+        case Kind::Toggle: {
+            bool on = s.overridden;
+            if (ImGui::Checkbox(s.label, &on)) {
+                s.overridden = on;
+                changed = true;
+                // RT shadows: put spot lights on shadow maps along with it (the safe setting).
+                if (on && wcscmp(s.cvar, L"r.RayTracing.Shadows") == 0)
+                    for (Setting& o : g_settings)
+                        if (wcscmp(o.cvar, L"r.RayTracing.Shadows.Lights.Spot") == 0) o.overridden = true;
+            }
+            break;
+        }
+        case Kind::Choice: {
+            const char* preview = s.overridden ? ChoiceLabel(s, static_cast<int>(lroundf(s.value))) : gameText;
+            if (ImGui::BeginCombo(s.label, preview ? preview : "?")) {
+                if (ImGui::Selectable(gameText, !s.overridden)) {
+                    s.overridden = false;
+                    changed = true;
+                }
+                for (const Choice& c : s.choices)
+                    if (ImGui::Selectable(c.label, s.overridden && lroundf(s.value) == c.value)) {
+                        s.overridden = true;
+                        s.value = static_cast<float>(c.value);
+                        changed = true;
+                    }
+                ImGui::EndCombo();
+            }
+            break;
+        }
+        case Kind::Int:
+        case Kind::Float: {
+            bool on = s.overridden;
+            if (ImGui::Checkbox("##override", &on)) {
+                s.overridden = on;
+                if (on) s.value = game < s.min || game > s.max ? s.min : game;  // start from the game's value
+                changed = true;
+            }
+            ImGui::SetItemTooltip("Override the game's value");
+            ImGui::SameLine();
+            if (!s.overridden) ImGui::BeginDisabled();
+            if (s.kind == Kind::Int) {
+                int v = static_cast<int>(lroundf(s.overridden ? s.value : game));
+                if (ImGui::SliderInt(s.label, &v, static_cast<int>(s.min), static_cast<int>(s.max),
+                                     s.overridden ? "%d" : "game: %d")) {
+                    s.value = static_cast<float>(v);
+                    changed = true;
+                }
+            } else {
+                float v = s.overridden ? s.value : game;
+                if (ImGui::SliderFloat(s.label, &v, s.min, s.max, s.overridden ? "%.2f" : "game: %.2f")) {
+                    s.value = v;
+                    changed = true;
+                }
+            }
+            if (!s.overridden) ImGui::EndDisabled();
+            break;
+        }
     }
-    if (!g_manager) ImGui::EndDisabled();
+    if (s.help) ImGui::SetItemTooltip("%s", s.help);
+    if (s.missing) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("(not in this build)");
+    }
+    if (changed && s.persist) g_settingsDirty = true;
+    ImGui::PopID();
+}
 
+void DrawGroup(const char* group, bool open) {
+    if (!ImGui::CollapsingHeader(group, open ? ImGuiTreeNodeFlags_DefaultOpen : 0)) return;
+    for (Setting& s : g_settings)
+        if (strcmp(s.group, group) == 0) DrawSetting(s);
+}
+
+void DrawDiagnostics() {
+    if (!ImGui::CollapsingHeader("Diagnostics")) return;
+    for (Setting& s : g_settings)
+        if (strcmp(s.group, "Diagnostics") == 0) DrawSetting(s);
     ImGui::Separator();
     {
         std::lock_guard rtLock(g_rtMutex);
@@ -976,17 +1239,40 @@ void DrawOverlay(effect_runtime*) {
         }
     }
     if (ImGui::Button("Log ray dispatches (one frame)") && g_capture == kCaptureOff) g_capture = kCaptureArmed;
+    ImGui::SameLine();
+    if (ImGui::Button("Snapshot cvars")) g_snapshotRequested = true;
+    ImGui::SetItemTooltip("Logs what changed since the last snapshot, e.g. after changing a game menu option.");
+    ImGui::TextDisabled("%s", g_frames < kCensusFrame ? "Census after 10 s" : g_status.c_str());
+}
 
+void DrawOverlay(effect_runtime*) {
+    std::lock_guard lock(g_mutex);
+    ImGui::TextUnformatted(DPRT_PRODUCT " " DPRT_VERSION);
+    if (!g_manager) {
+        ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), "Waiting for the game's console variables...");
+        return;
+    }
+    ImGui::SeparatorText("Presets");
+    for (size_t i = 0; i < sizeof(kPresets) / sizeof(kPresets[0]); ++i) {
+        if (i) ImGui::SameLine();
+        if (ImGui::Button(kPresets[i].name)) ApplyPreset(kPresets[i]);
+        ImGui::SetItemTooltip("%s", kPresets[i].help);
+    }
+    ImGui::TextDisabled("Presets change reflections and AO; shadows stay as set below.");
+
+    DrawGroup("Reflections", true);
+    DrawGroup("Ambient occlusion", true);
+    DrawGroup("Shadows (experimental)", false);
+    DrawDiagnostics();
     ImGui::Separator();
-    if (ImGui::Button("Snapshot cvars (logs what changed)")) g_snapshotRequested = true;
-    ImGui::TextWrapped(
-        "Change a graphics option in the game's menu (e.g. ray traced reflections), then take a snapshot: "
-        "the log lists the cvars it changed.");
+    ImGui::TextDisabled("Overrides are saved in ReShade.ini [" DPRT_PRODUCT "] and applied at start.");
 }
 
 void Install() {
     OpenLog();
     LogGameInfo();
+    DefineSettings();
+    LoadSettings();
     reshade::register_event<reshade::addon_event::init_device>(&OnInitDevice);
     reshade::register_event<reshade::addon_event::present>(&OnPresent);
     LoadReplacements();

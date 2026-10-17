@@ -393,3 +393,21 @@ Leave constants, `FMin` and `5.0 - x` TMax alone. Steps:
   affected; that would show up in game, not in their assets. Next step, if pursued: a
   ray tracing debug view of the scene's geometry (UE's `RayTracingDebug` show flag isn't
   reachable through cvars in a shipping build).
+
+## 0.3.0: settings overlay (2026-10-17)
+- RT shadows are parked. Turning them on in the overlay also puts spot lights on shadow
+  maps (`r.RayTracing.Shadows.Lights.Spot 0`), the safe setting. The active
+  `DarkPicturesRT_shaders` is the plain 25 cm set; the mask-13 set is kept as
+  `_25cm_mask13`.
+- The overlay drives cvars through a generic `Setting` (toggle, choice, int, float):
+  `Set` at `ECVF_SetByConsole` plus `MirrorToRenderer`, restoring the game's priority and
+  value when the override is turned off. Overrides persist in `ReShade.ini`
+  `[DarkPicturesRT]` (`<cvar>=<value>` or `game`). The console manager is found from the
+  first frames (singleton scanned once), so saved settings apply at start, not after
+  the 10 s census.
+- Reflections: the game uses `r.RayTracing.Reflections.ExperimentalDeferred 1` (UE: "only
+  supports a subset of features but runs faster") with `r.Reflections.Denoiser 0` and
+  `ScreenPercentage 25`. The presets "High" and "Ultra" switch to the standard algorithm
+  (`ExperimentalDeferred 0`) with `r.Reflections.Denoiser 2`, which is needed for it, at
+  100%, plus samples, bounces and shadows in reflections. AO: samples per pixel 2 / 4.
+  _Not yet tested in game: image quality and frame cost of each preset._
