@@ -511,26 +511,27 @@ void DefineSettings() {
          {{0, "Off"}, {1, "On"}}},
         {"Translucency", L"r.RayTracing.Translucency.MaxRoughness", "Max roughness", nullptr, Kind::Float, 0, 1},
 
-        // Experimental: effects the game was cooked with but never turns on. Presets leave
-        // them alone. Tested: final gather GI is noisy as is; sky light is noisy indoors
-        // and looks good outdoors.
-        {"Experimental", L"r.RayTracing.GlobalIllumination", "Ray traced global illumination",
-         "Bounce light. Expensive; final gather is the cheaper method. The game's lighting is largely baked, "
-         "so it may double up.",
+        // Global illumination: final gather is noisy as is, but clean with firefly
+        // suppression and filter width 2 (tested). Not in presets (cost).
+        // Experimental: sky light, noisy indoors and good outdoors (tested). Presets leave
+        // both alone.
+        {"Global illumination", L"r.RayTracing.GlobalIllumination", "Ray traced global illumination",
+         "Bounce light. Final gather is the cheaper method; choosing it also turns on firefly suppression and "
+         "filter width 2, which remove its noise (tested).",
          Kind::Choice, 0, 0, {{-1, "Post-process volume"}, {0, "Off"}, {1, "Brute force"}, {2, "Final gather"}}},
-        {"Experimental", L"r.RayTracing.GlobalIllumination.SamplesPerPixel", "GI: samples per pixel", nullptr,
+        {"Global illumination", L"r.RayTracing.GlobalIllumination.SamplesPerPixel", "GI: samples per pixel", nullptr,
          Kind::Int, 1, 8},
-        {"Experimental", L"r.RayTracing.GlobalIllumination.MaxBounces", "GI: bounces", nullptr, Kind::Int, 1, 4},
-        {"Experimental", L"r.RayTracing.GlobalIllumination.ScreenPercentage", "GI: resolution (%)",
+        {"Global illumination", L"r.RayTracing.GlobalIllumination.MaxBounces", "GI: bounces", nullptr, Kind::Int, 1, 4},
+        {"Global illumination", L"r.RayTracing.GlobalIllumination.ScreenPercentage", "GI: resolution (%)",
          "UE's default is 50.", Kind::Float, 25, 100},
-        {"Experimental", L"r.RayTracing.GlobalIllumination.FireflySuppression", "GI: firefly suppression",
+        {"Global illumination", L"r.RayTracing.GlobalIllumination.FireflySuppression", "GI: firefly suppression",
          "Tonemaps samples to suppress bright speckles.", Kind::Toggle, 1},
-        {"Experimental", L"r.RayTracing.GlobalIllumination.FinalGather.FilterWidth", "GI: filter width (final gather)",
+        {"Global illumination", L"r.RayTracing.GlobalIllumination.FinalGather.FilterWidth", "GI: filter width (final gather)",
          "Neighbourhood for sample stealing between pixels. Default 0; higher is smoother and blurrier.", Kind::Int, 0,
          8},
-        {"Experimental", L"r.RayTracing.GlobalIllumination.FinalGather.Iterations", "GI: iterations (final gather)",
+        {"Global illumination", L"r.RayTracing.GlobalIllumination.FinalGather.Iterations", "GI: iterations (final gather)",
          "Iterations of gather point creation. More is less noisy and slower.", Kind::Int, 1, 8},
-        {"Experimental", L"r.RayTracing.GlobalIllumination.Denoiser", "GI: denoiser", nullptr, Kind::Choice, 0, 0,
+        {"Global illumination", L"r.RayTracing.GlobalIllumination.Denoiser", "GI: denoiser", nullptr, Kind::Choice, 0, 0,
          {{0, "Off"}, {1, "On"}}},
         {"Experimental", L"r.RayTracing.SkyLight", "Ray traced sky light",
          "Occlusion of sky lighting. For outdoor scenes: indoors it is very noisy (tested).", Kind::Toggle, 1},
@@ -720,8 +721,9 @@ void SaveSettings() {
 
 void ApplyPreset(const Preset& p) {
     for (Setting& s : g_settings) {
-        if (!s.persist || strcmp(s.group, "Shadows") == 0 || strcmp(s.group, "Experimental") == 0)
-            continue;  // presets leave shadows and experiments alone
+        if (!s.persist || strcmp(s.group, "Shadows") == 0 || strcmp(s.group, "Global illumination") == 0 ||
+            strcmp(s.group, "Experimental") == 0)
+            continue;  // presets leave shadows, GI and experiments alone
         s.overridden = false;
         for (auto& [cvar, v] : p.values)
             if (wcscmp(cvar, s.cvar) == 0) {
@@ -1218,6 +1220,20 @@ void DrawSetting(Setting& s) {
                         s.overridden = true;
                         s.value = static_cast<float>(c.value);
                         changed = true;
+                        // GI: final gather needs firefly suppression and some sample stealing to be
+                        // clean (tested); brute force gets firefly suppression. Settings the user has
+                        // set already are left alone.
+                        if (wcscmp(s.cvar, L"r.RayTracing.GlobalIllumination") == 0 && c.value >= 1)
+                            for (Setting& o : g_settings) {
+                                if (o.overridden) continue;
+                                if (wcscmp(o.cvar, L"r.RayTracing.GlobalIllumination.FireflySuppression") == 0)
+                                    o.overridden = true;
+                                if (c.value == 2 &&
+                                    wcscmp(o.cvar, L"r.RayTracing.GlobalIllumination.FinalGather.FilterWidth") == 0) {
+                                    o.overridden = true;
+                                    o.value = 2;
+                                }
+                            }
                     }
                 ImGui::EndCombo();
             }
@@ -1309,12 +1325,13 @@ void DrawOverlay(effect_runtime*) {
         if (ImGui::Button(kPresets[i].name)) ApplyPreset(kPresets[i]);
         ImGui::SetItemTooltip("%s", kPresets[i].help);
     }
-    ImGui::TextDisabled("Presets change reflections, translucency and AO; shadows and experiments stay as set below.");
+    ImGui::TextDisabled("Presets change reflections, translucency and AO; shadows, GI and experiments stay as set.");
 
     DrawGroup("Reflections", true);
     DrawGroup("Translucency", true);
     DrawGroup("Ambient occlusion", true);
     DrawGroup("Shadows", true);
+    DrawGroup("Global illumination", true);
     DrawGroup("Experimental", false);
     DrawDiagnostics();
     ImGui::Separator();

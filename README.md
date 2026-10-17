@@ -7,7 +7,7 @@ compiled in. The game's menu only offers ray-traced reflections. This add-on
 exposes the rest through the engine's console variables, live, from a ReShade
 overlay tab.
 
-**Status: 0.4.1.** Tested in The Devil in Me. See [docs/FINDINGS.md](docs/FINDINGS.md)
+**Status: 0.4.2.** Tested in The Devil in Me. See [docs/FINDINGS.md](docs/FINDINGS.md)
 for how it works and what was found along the way.
 
 ## Install
@@ -18,7 +18,7 @@ or run `.\build.ps1 -Install`.
 ## Use
 Open ReShade (Home), go to the **DarkPicturesRT** tab.
 
-- **Presets** change reflections, translucency and AO; shadows and experiments stay as you set them.
+- **Presets** change reflections, translucency and AO; shadows, GI and experiments stay as you set them.
   - *Game default*: everything back to the game's values.
   - *Sharper reflections*: the game's reflection algorithm at 50% resolution (the game uses 25%).
   - *High*: reflections at full resolution, history weight 0.9 (game 0.95) to cut smearing;
@@ -37,9 +37,10 @@ Open ReShade (Home), go to the **DarkPicturesRT** tab.
   FINDINGS).
 - **Translucency**: ray traced translucency, with refraction and max roughness. Fixes
   glass that the game's raster translucency blows out to white (display cases).
-- **Experimental**: global illumination (brute force or final gather) with noise controls
-  (firefly suppression, final gather filter width and iterations, denoiser), and sky
-  light (for outdoor scenes; noisy indoors). Presets leave them alone.
+- **Global illumination**: ray traced bounce light, brute force or final gather (cheaper).
+  Choosing final gather also turns on firefly suppression and filter width 2, which
+  make it clean; samples, bounces, resolution, iterations and the denoiser are there too.
+- **Experimental**: ray traced sky light, for outdoor scenes (noisy indoors).
 - **Diagnostics**: test switches and logging from the investigation.
 
 Overrides are saved in `ReShade.ini`, section `[DarkPicturesRT]`, and applied at

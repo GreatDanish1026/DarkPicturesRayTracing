@@ -453,3 +453,7 @@ as an "Experimental" section that presets don't touch. _Pending in-game test of 
   `FireflySuppression` (int data, 0 in game), `FinalGather.FilterWidth` (sample stealing, default
   0), `FinalGather.Iterations` and `Denoiser` (Ref). Sky light gains `Denoiser`, and its help text
   says outdoor scenes. GI and sky light stay experimental.
+- 0.4.1 test: GI final gather with **firefly suppression "helped a lot"**, and **filter width 2
+  "removed all noise"**. 0.4.2 gives GI its own section (not in presets, for cost); choosing final
+  gather also turns on firefly suppression and filter width 2, and brute force turns on firefly
+  suppression, unless the user has set them already. Sky light stays experimental.
