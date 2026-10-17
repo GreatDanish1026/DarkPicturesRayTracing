@@ -12,7 +12,11 @@ length (a light closer than 2 * Bias keeps half its shadow ray, not none). Trace
 constant, FMin-capped or other TMax (directional lights, short hair/transmission rays)
 are left alone.
 
-    python -I tools/patch_tmax.py <dxil folder> <work folder> <bias cm> [--stage <folder>]
+    python -I tools/patch_tmax.py <dxil folder> <work folder> <bias cm> [--mask N] [--stage <folder>]
+
+--mask N replaces the patched rays' InstanceInclusionMask (UE 4.26: 12 = SHADOW 0x08 |
+THIN_SHADOW 0x04) with N, e.g. 13 to also hit opaque instances (0x01) that don't cast
+shadows, such as a prop whose shadow-map shadow comes from a hidden proxy.
 
 Reads the OcclusionRGS libraries listed in <dxil folder>\\index.txt, writes the patched
 IR and signed containers to <work folder>\\tmax_<bias>\\<hash>.{ll,dxil}, and with --stage
@@ -103,7 +107,7 @@ def leaves(value, defs, seen=None):
     return {"other"}
 
 
-def patch(text, bias):
+def patch(text, bias, mask=None):
     lines = text.splitlines()
     defs = {}
     for line in lines:
@@ -125,6 +129,8 @@ def patch(text, bias):
                 out.append(f"{indent}{h} = fmul fast float {tmax}, 5.000000e-01")
                 out.append(f"{indent}{c} = call float @dx.op.binary.f32(i32 35, float {b}, float {h})  ; FMax(a,b)")
                 args[14] = f"float {c}"
+                if mask is not None and args[3] == "i32 12":  # InstanceInclusionMask
+                    args[3] = f"i32 {mask}"
                 line = line[: m.start(1)] + ", ".join(args) + line[m.end(1):]
                 patched += 1
                 n += 1
@@ -145,10 +151,15 @@ def main():
         stage = args[i + 1]
         del args[i:i + 2]
         os.makedirs(stage, exist_ok=True)
+    mask = None
+    if "--mask" in args:
+        i = args.index("--mask")
+        mask = int(args[i + 1])
+        del args[i:i + 2]
     if len(args) != 3:
         raise SystemExit(__doc__)
     folder, work, bias = args[0], args[1], float(args[2])
-    outdir = os.path.join(work, f"tmax_{bias:g}")
+    outdir = os.path.join(work, f"tmax_{bias:g}" + (f"_mask{mask}" if mask is not None else ""))
     os.makedirs(outdir, exist_ok=True)
     hashes = []
     for line in open(os.path.join(folder, "index.txt"), encoding="utf-8", errors="replace"):
@@ -159,7 +170,7 @@ def main():
     for h in hashes:
         text = subprocess.run([SDK, "-dumpbin", os.path.join(folder, h + ".dxil")], capture_output=True,
                               text=True).stdout
-        new, patched, total = patch(text, bias)
+        new, patched, total = patch(text, bias, mask)
         calls += total
         patched_calls += patched
         ll = os.path.join(outdir, h + ".ll")

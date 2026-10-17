@@ -303,3 +303,17 @@ Leave constants, `FMin` and `5.0 - x` TMax alone. Steps:
   rays through; translucent materials don't cast RT shadows), or the attached hat sitting
   at a wrong transform in the ray tracing scene. Next test: the "Masked materials as
   opaque" toggle (`r.RayTracing.Shadows.EnableMaterials 0`).
+- Brim follow-up (2026-10-17): `EnableMaterials 0` reached the renderer but didn't bring
+  the brim shadow back, so the material isn't the cause. At 50 cm, the light *does* cast
+  RT shadows from nearby geometry: the jaw shadows the neck and the bow tie shadows the
+  shirt. Only the hat casts nothing, so shadow rays never hit it.
+  Hypothesis: the shadow rays' **InstanceInclusionMask is 12** (UE 4.26
+  `RAY_TRACING_MASK_SHADOW` 0x08 | `THIN_SHADOW` 0x04), and an instance only gets the shadow bit
+  if it casts shadows. A hat whose shadow-map shadow comes from a hidden proxy or an inset
+  shadow (with shadow casting off on the visible mesh) is skipped. Test set: 25 cm with
+  `--mask 13` (adds `OPAQUE` 0x01) on the light-distance rays. If the brim still casts
+  nothing, the hat isn't in the ray tracing scene at all.
+- Toggling RT shadow options creates **new `OcclusionRGS` permutations**: 96 more libraries
+  appeared during the 13:26 run (192 in total, 8100–20004 bytes), most likely from
+  `EnableMaterials 0`. The 96-library sets didn't cover them, so that toggle ran unpatched
+  shaders. All sets (10/25/50 cm, and 25 cm mask 13) are now built for all 192.
