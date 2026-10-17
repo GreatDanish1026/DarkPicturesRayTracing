@@ -20,10 +20,12 @@ Open ReShade (Home), go to the **DarkPicturesRT** tab.
 
 - **Presets** change reflections and AO; RT shadows stay as you set them.
   - *Game default*: everything back to the game's values.
-  - *Sharper reflections*: the game's fast reflections at twice the resolution.
-  - *High*: standard (full-featured) reflections at full resolution with the
-    screen-space denoiser and hard shadows in reflections; AO at 2 samples.
-  - *Ultra*: High with 2 bounces, 2 samples, soft shadows in reflections, AO at 4 samples.
+  - *Sharper reflections*: the game's reflection algorithm at 50% resolution (the game uses 25%).
+  - *High*: the game's algorithm at full resolution.
+  - *Ultra*: full resolution with 16 resolve samples (the game uses 8); AO at 2 samples.
+
+  All presets keep the game's fast deferred reflection algorithm. UE's standard
+  algorithm is available as a setting, but it is very noisy in this game.
 - **Reflections** and **Ambient occlusion**: individual settings. A setting shows
   the game's value until you override it (combo box choice, or the checkbox next to
   a slider). Hover for help.
