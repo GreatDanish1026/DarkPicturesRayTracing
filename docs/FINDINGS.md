@@ -317,3 +317,9 @@ Leave constants, `FMin` and `5.0 - x` TMax alone. Steps:
   appeared during the 13:26 run (192 in total, 8100–20004 bytes), most likely from
   `EnableMaterials 0`. The 96-library sets didn't cover them, so that toggle ran unpatched
   shaders. All sets (10/25/50 cm, and 25 cm mask 13) are now built for all 192.
+- Mask-13 run (13:33): the set loaded (192) and 96 swaps were accepted with 0 failures,
+  but the "after" screenshot was taken with `Lights.Spot 0` (spots on shadow maps).
+  It matches RT off exactly (mean difference 0.21/255, no pixel off by more than 24):
+  the brim shadow is cast by a spot light, and with spots on shadow maps the other RT
+  shadowed lights change nothing visible in this shot. The mask-13 brim test still needs
+  a screenshot with spots on RT.
