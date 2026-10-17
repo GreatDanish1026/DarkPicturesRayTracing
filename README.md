@@ -7,7 +7,7 @@ compiled in. The game's menu only offers ray-traced reflections. This add-on
 exposes the rest through the engine's console variables, live, from a ReShade
 overlay tab.
 
-**Status: 0.4.2.** Tested in The Devil in Me. See [docs/FINDINGS.md](docs/FINDINGS.md)
+**Status: 0.5.0.** Tested in The Devil in Me. See [docs/FINDINGS.md](docs/FINDINGS.md)
 for how it works and what was found along the way.
 
 ## Install
@@ -16,36 +16,32 @@ Copy `bin\DarkPicturesRT.addon64` next to the game's `*-Win64-Shipping.exe`,
 or run `.\build.ps1 -Install`.
 
 ## Use
-Open ReShade (Home), go to the **DarkPicturesRT** tab.
+Open ReShade (Home), go to the **DarkPicturesRT** tab. The tab opens in a simple view:
 
-- **Presets** change reflections, translucency and AO; shadows, GI and experiments stay as you set them.
-  - *Game default*: everything back to the game's values.
-  - *Sharper reflections*: the game's reflection algorithm at 50% resolution (the game uses 25%).
-  - *High*: reflections at full resolution, history weight 0.9 (game 0.95) to cut smearing;
-    ray traced translucency.
-  - *Ultra*: reflections at full resolution, 16 resolve samples (the game uses 8), history
-    weight 0.85; ray traced translucency; AO at 2 samples.
+- **Quality**: presets for reflections, translucency and AO. The button matching the
+  current settings is highlighted ("custom" if none does).
+  - *Game default*: the game's own settings.
+  - *Sharper*: the game's reflections at 50% resolution (the game uses 25%).
+  - *High*: reflections at full resolution with less history (0.9, game 0.95) to cut
+    smearing; ray traced translucency.
+  - *Ultra*: High with 16 reflection resolve samples (game 8), history 0.85, and AO at 2 samples.
+- **Ray traced shadows**: on for the game's lights, with spot lights kept on shadow maps
+  (the game's key lights are spot lights; under RT some props, such as hats, lose
+  their shadows from them).
+- **Ray traced translucency**: proper glass; fixes display cases the game renders blown out.
+- **Global illumination**: Off, or final gather (ray traced bounce light, with firefly
+  suppression and filter width 2, which make it clean).
+- **Ray traced sky light**: for outdoor scenes (noisy indoors).
+- A count of changed settings, with **Reset all** (asks for a second click).
 
-  All presets keep the game's fast deferred reflection algorithm. UE's standard
-  algorithm is available as a setting, but it is very noisy in this game.
-- **Reflections** and **Ambient occlusion**: individual settings. A setting shows
-  the game's value until you override it (combo box choice, or the checkbox next to
-  a slider). Hover for help.
-- **Shadows**: ray-traced shadows for the game's lights. Turning them on also puts
-  spot lights on shadow maps (recommended): the game's key lights are spot lights,
-  and with RT shadows some props, such as hats, lose their shadows from them (see
-  FINDINGS).
-- **Translucency**: ray traced translucency, with refraction and max roughness. Fixes
-  glass that the game's raster translucency blows out to white (display cases).
-- **Global illumination**: ray traced bounce light, brute force or final gather (cheaper).
-  Choosing final gather also turns on firefly suppression and filter width 2, which
-  make it clean; samples, bounces, resolution, iterations and the denoiser are there too.
-- **Experimental**: ray traced sky light, for outdoor scenes (noisy indoors).
-- **Diagnostics**: test switches and logging from the investigation.
+**Show advanced settings** opens every setting individually (reflections, translucency,
+AO, shadows, GI, and experimental sky light options), with sliders that stay locked
+until you tick their override checkbox. Inside it, **Show diagnostics** opens the
+troubleshooting tools.
 
-Overrides are saved in `ReShade.ini`, section `[DarkPicturesRT]`, and applied at
-start. Overridden values outrank the game's menu, so the menu can't change them
-until you set them back to "Game".
+All settings are saved in `ReShade.ini`, section `[DarkPicturesRT]`, and applied at
+start. Changed settings outrank the game's menu, so the menu can't change them until
+you set them back to "Game" (or press Reset all).
 
 ### RT shadow shader fix (optional)
 With RT shadows on for spot lights, a light fixture around the light can block its shadow rays.

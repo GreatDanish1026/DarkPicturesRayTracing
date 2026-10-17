@@ -441,6 +441,7 @@ struct Setting {
 
 std::vector<Setting> g_settings;
 bool g_settingsDirty = false;  // save to ReShade.ini on the next present
+extern bool g_showAdvanced, g_showDiagnostics;  // overlay view, saved with the settings
 
 void DefineSettings() {
     const std::vector<Choice> gameOffOn = {{-1, "Post-process volume"}, {0, "Off"}, {1, "On"}};
@@ -708,6 +709,8 @@ void LoadSettings() {
         s.value = static_cast<float>(atof(value));
         ++loaded;
     }
+    reshade::get_config_value(nullptr, DPRT_PRODUCT, "ShowAdvanced", g_showAdvanced);
+    reshade::get_config_value(nullptr, DPRT_PRODUCT, "ShowDiagnostics", g_showDiagnostics);
     Log("settings: %d overrides loaded from ReShade.ini [" DPRT_PRODUCT "]", loaded);
 }
 
@@ -1312,6 +1315,165 @@ void DrawDiagnostics() {
     ImGui::TextDisabled("%s", g_frames < kCensusFrame ? "Census after 10 s" : g_status.c_str());
 }
 
+// ---------------------------------------------------------------- simple view
+
+// The default view: presets plus one switch per effect, no sliders. The per-setting
+// sections are behind "Show advanced settings", and the investigation tools behind
+// "Show diagnostics" inside that, so nothing can be nudged by accident.
+
+bool g_showAdvanced = false;     // declared with the settings
+bool g_showDiagnostics = false;
+bool g_confirmReset = false;  // "Reset all" waits for a second click
+
+Setting* FindSetting(const wchar_t* cvar) {
+    for (Setting& s : g_settings)
+        if (wcscmp(s.cvar, cvar) == 0) return &s;
+    return nullptr;
+}
+
+bool IsOn(const wchar_t* cvar, float value) {
+    Setting* s = FindSetting(cvar);
+    return s && s->overridden && Wanted(*s) == value;
+}
+
+void SetOverride(const wchar_t* cvar, bool on, float value = 0) {
+    if (Setting* s = FindSetting(cvar)) {
+        s->overridden = on;
+        if (on) s->value = value;
+        g_settingsDirty = true;
+    }
+}
+
+bool IsPresetGroup(const Setting& s) {
+    return s.persist && strcmp(s.group, "Shadows") != 0 && strcmp(s.group, "Global illumination") != 0 &&
+           strcmp(s.group, "Experimental") != 0;
+}
+
+// The preset the current settings match exactly, or -1 (custom).
+int ActivePreset() {
+    for (size_t i = 0; i < sizeof(kPresets) / sizeof(kPresets[0]); ++i) {
+        bool match = true;
+        for (const Setting& s : g_settings) {
+            if (!IsPresetGroup(s)) continue;
+            const double* want = nullptr;
+            for (auto& [cvar, v] : kPresets[i].values)
+                if (wcscmp(cvar, s.cvar) == 0) want = &v;
+            if (want ? !(s.overridden && fabsf(s.value - static_cast<float>(*want)) < 1e-4f) : s.overridden) {
+                match = false;
+                break;
+            }
+        }
+        if (match) return static_cast<int>(i);
+    }
+    return -1;
+}
+
+int OverrideCount() {
+    int n = 0;
+    for (const Setting& s : g_settings) n += s.persist && s.overridden;
+    return n;
+}
+
+void ResetAll() {
+    for (Setting& s : g_settings) s.overridden = false;
+    g_settingsDirty = true;
+    Log("settings: reset all to the game's values");
+}
+
+// A switch row: label on the left, checkbox in the second column, note after it.
+bool SwitchRow(const char* label, bool* on, const char* note, const char* help) {
+    ImGui::TableNextColumn();
+    ImGui::TextUnformatted(label);
+    if (help) ImGui::SetItemTooltip("%s", help);
+    ImGui::TableNextColumn();
+    ImGui::PushID(label);
+    bool changed = ImGui::Checkbox("##on", on);
+    ImGui::PopID();
+    if (help) ImGui::SetItemTooltip("%s", help);
+    if (note) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("%s", note);
+    }
+    return changed;
+}
+
+void DrawSimple() {
+    // Quality presets, the active one highlighted.
+    int active = ActivePreset();
+    ImGui::TextUnformatted("Quality");
+    ImGui::SameLine();
+    for (size_t i = 0; i < sizeof(kPresets) / sizeof(kPresets[0]); ++i) {
+        ImGui::SameLine();
+        bool highlight = static_cast<int>(i) == active;
+        if (highlight) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+        if (ImGui::Button(kPresets[i].name)) ApplyPreset(kPresets[i]);
+        if (highlight) ImGui::PopStyleColor();
+        ImGui::SetItemTooltip("%s", kPresets[i].help);
+    }
+    if (active < 0) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("(custom)");
+    }
+    ImGui::Spacing();
+
+    if (ImGui::BeginTable("##switches", 2)) {
+        bool shadows = IsOn(L"r.RayTracing.Shadows", 1);
+        if (SwitchRow("Ray traced shadows", &shadows, "spot lights stay on shadow maps",
+                      "Ray traced shadows for the game's lights. The game's key lights are spot lights and keep "
+                      "their shadow maps: under RT some props (such as hats) lose their shadows from them.")) {
+            SetOverride(L"r.RayTracing.Shadows", shadows, 1);
+            SetOverride(L"r.RayTracing.Shadows.Lights.Spot", shadows, 0);
+        }
+        bool glass = IsOn(L"r.RayTracing.Translucency", 1);
+        if (SwitchRow("Ray traced translucency", &glass, "glass",
+                      "Proper reflections and refraction on glass; fixes display cases that render blown out."))
+            SetOverride(L"r.RayTracing.Translucency", glass, 1);
+
+        ImGui::TableNextColumn();
+        ImGui::TextUnformatted("Global illumination");
+        ImGui::SetItemTooltip("Ray traced bounce light (final gather, with firefly suppression and filter width 2).");
+        ImGui::TableNextColumn();
+        bool gi = IsOn(L"r.RayTracing.GlobalIllumination", 2);
+        if (ImGui::RadioButton("Off", !gi) && gi) {
+            SetOverride(L"r.RayTracing.GlobalIllumination", false);
+            SetOverride(L"r.RayTracing.GlobalIllumination.FireflySuppression", false);
+            SetOverride(L"r.RayTracing.GlobalIllumination.FinalGather.FilterWidth", false);
+        }
+        ImGui::SameLine();
+        if (ImGui::RadioButton("Final gather", gi) && !gi) {
+            SetOverride(L"r.RayTracing.GlobalIllumination", true, 2);
+            SetOverride(L"r.RayTracing.GlobalIllumination.FireflySuppression", true, 1);
+            SetOverride(L"r.RayTracing.GlobalIllumination.FinalGather.FilterWidth", true, 2);
+        }
+
+        bool sky = IsOn(L"r.RayTracing.SkyLight", 1);
+        if (SwitchRow("Ray traced sky light", &sky, "outdoor scenes",
+                      "Occlusion of sky lighting. Looks good outdoors; indoors it is very noisy."))
+            SetOverride(L"r.RayTracing.SkyLight", sky, 1);
+        ImGui::EndTable();
+    }
+
+    ImGui::Spacing();
+    int n = OverrideCount();
+    if (n == 0) {
+        ImGui::TextDisabled("Everything is at the game's own settings.");
+    } else {
+        ImGui::TextDisabled("%d setting%s changed from the game's own.", n, n == 1 ? "" : "s");
+        ImGui::SameLine();
+        if (!g_confirmReset) {
+            if (ImGui::SmallButton("Reset all")) g_confirmReset = true;
+            ImGui::SetItemTooltip("Back to the game's own settings for everything.");
+        } else {
+            if (ImGui::SmallButton("Click again to reset everything")) {
+                ResetAll();
+                g_confirmReset = false;
+            }
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Cancel")) g_confirmReset = false;
+        }
+    }
+}
+
 void DrawOverlay(effect_runtime*) {
     std::lock_guard lock(g_mutex);
     ImGui::TextUnformatted(DPRT_PRODUCT " " DPRT_VERSION);
@@ -1319,23 +1481,30 @@ void DrawOverlay(effect_runtime*) {
         ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), "Waiting for the game's console variables...");
         return;
     }
-    ImGui::SeparatorText("Presets");
-    for (size_t i = 0; i < sizeof(kPresets) / sizeof(kPresets[0]); ++i) {
-        if (i) ImGui::SameLine();
-        if (ImGui::Button(kPresets[i].name)) ApplyPreset(kPresets[i]);
-        ImGui::SetItemTooltip("%s", kPresets[i].help);
-    }
-    ImGui::TextDisabled("Presets change reflections, translucency and AO; shadows, GI and experiments stay as set.");
-
-    DrawGroup("Reflections", true);
-    DrawGroup("Translucency", true);
-    DrawGroup("Ambient occlusion", true);
-    DrawGroup("Shadows", true);
-    DrawGroup("Global illumination", true);
-    DrawGroup("Experimental", false);
-    DrawDiagnostics();
     ImGui::Separator();
-    ImGui::TextDisabled("Overrides are saved in ReShade.ini [" DPRT_PRODUCT "] and applied at start.");
+    DrawSimple();
+
+    ImGui::Separator();
+    if (ImGui::Checkbox("Show advanced settings", &g_showAdvanced))
+        reshade::set_config_value(nullptr, DPRT_PRODUCT, "ShowAdvanced", g_showAdvanced);
+    ImGui::SetItemTooltip("Every setting individually, with sliders.");
+    if (g_showAdvanced) {
+        ImGui::TextDisabled("A setting shows the game's value until you override it (combo choice, or the checkbox "
+                            "next to a slider).");
+        DrawGroup("Reflections", true);
+        DrawGroup("Translucency", true);
+        DrawGroup("Ambient occlusion", true);
+        DrawGroup("Shadows", true);
+        DrawGroup("Global illumination", true);
+        DrawGroup("Experimental", false);
+        ImGui::Separator();
+        if (ImGui::Checkbox("Show diagnostics", &g_showDiagnostics))
+            reshade::set_config_value(nullptr, DPRT_PRODUCT, "ShowDiagnostics", g_showDiagnostics);
+        ImGui::SetItemTooltip("Test switches and logging for troubleshooting.");
+        if (g_showDiagnostics) DrawDiagnostics();
+    }
+    ImGui::Separator();
+    ImGui::TextDisabled("Settings are saved in ReShade.ini [" DPRT_PRODUCT "] and applied at start.");
 }
 
 void Install() {

@@ -457,3 +457,12 @@ as an "Experimental" section that presets don't touch. _Pending in-game test of 
   "removed all noise"**. 0.4.2 gives GI its own section (not in presets, for cost); choosing final
   gather also turns on firefly suppression and filter width 2, and brute force turns on firefly
   suppression, unless the user has set them already. Sky light stays experimental.
+
+## 0.5.0: simple view (2026-10-17)
+With so many controls it was easy to change a slider by accident, so the tab now opens in a
+simple view: quality presets (the matching one highlighted, else "custom"), on/off switches for RT
+shadows (with spots on shadow maps), translucency and sky light, an Off / Final gather choice for GI
+(final gather with firefly suppression and filter width 2), and a count of changed settings with a
+two-click "Reset all". The per-setting sections are behind "Show advanced settings" and the
+investigation tools behind "Show diagnostics"; both choices are saved (`ShowAdvanced`,
+`ShowDiagnostics`). _Pending user review._

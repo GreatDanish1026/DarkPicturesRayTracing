@@ -4,9 +4,9 @@
 #define DPRT_PRODUCT "DarkPicturesRT"  // add-on name, ReShade.ini section, log and dump file prefix
 #define DPRT_GAMES "The Dark Pictures Anthology"
 #define DPRT_VERSION_MAJOR 0
-#define DPRT_VERSION_MINOR 4
-#define DPRT_VERSION_PATCH 2
-#define DPRT_VERSION "0.4.2"
+#define DPRT_VERSION_MINOR 5
+#define DPRT_VERSION_PATCH 0
+#define DPRT_VERSION "0.5.0"
 #define DPRT_RC_FILENAME "DarkPicturesRT.addon64"
 #define DPRT_RC_PRODUCT "DarkPicturesRT for The Dark Pictures Anthology"
 #define DPRT_RC_DESCRIPTION "DarkPicturesRT ReShade add-on"
