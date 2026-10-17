@@ -269,3 +269,23 @@ Leave constants, `FMin` and `5.0 - x` TMax alone. Steps:
   then 7. Pipelines are type 3, built from config, root signatures and 3+ existing
   collections (6), then grown with `AddToStateObject`. ReShade's pipeline model has no
   local root signature or association subobjects, which fits the 0.2.1 link failure.
+
+## TMax bias patch (tools/patch_tmax.py, 2026-10-17)
+- Rule: for each `TraceRay` in `OcclusionRGS` whose TMax is a light distance, insert
+  `TMax' = max(TMax - Bias, 0.5 * TMax)` (FMax, opcode 35), so rays stop Bias cm short of
+  the light, but a light closer than 2 x Bias keeps half its ray, not none. "Light
+  distance" means TMax's leaves (through phi and select) are Sqrt, arithmetic on a Sqrt,
+  or constants under 1 cm. Three patterns occur, 84 calls each:
+  - plain `sqrt(dot(d, d))`;
+  - `phi[select(valid, sqrt(...), 0.01), sqrt(...)]`, where 0.01 is a "trace nothing"
+    length for an invalid sample;
+  - `phi[sqrt, sqrt, |d|cos - sqrt(r^2 - ...)]`, a ray-sphere intersection with the light's
+    source radius.
+  Left alone: the directional constant (0x4589D971E0000000), `FMin` caps, and the
+  fixed-length `5.0` / `5.0 - x` rays (probably hair or transmission).
+- Result: **252 of 432** `TraceRay` calls patched; all 96 libraries assemble and validate
+  at 10, 25 and 50 cm. 72 libraries are patched, and the 24 untouched ones are the
+  directional-light permutations.
+- Staged for the fixture test: 25 cm in `DarkPicturesRT_shaders`. 10 cm and 50 cm are in
+  `DarkPicturesRT_shaders_10cm` / `_50cm` next to the exe (rename to switch; restart, since
+  collections are created once). _Pending in-game run._
