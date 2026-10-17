@@ -445,3 +445,11 @@ Census values: `r.RayTracing.Translucency` 0 (int data; -1 volume, 0 off, 1 on),
 already include `GlobalIlluminationRGS` (2) and `RayTracingCreateGatherPointsTraceRGS` (4), so the
 GI shaders exist. 0.4.0 adds these, with refraction, max roughness, samples, bounces and resolution,
 as an "Experimental" section that presets don't touch. _Pending in-game test of each._
+- 0.4.0 test (Act 1 hotel pharmacy, screenshots 14:43–14:44): **RT translucency fixes the display
+  cases**, which raster translucency renders blown out to white, and leaves the rest of the frame
+  unchanged. **GI final gather** adds blotchy, speckled noise to the walls. **Sky light** is heavily
+  speckled indoors (nearly all sky rays blocked) but "looked great outdoors".
+- 0.4.1: translucency gets its own section, and High and Ultra turn it on. GI gains
+  `FireflySuppression` (int data, 0 in game), `FinalGather.FilterWidth` (sample stealing, default
+  0), `FinalGather.Iterations` and `Denoiser` (Ref). Sky light gains `Denoiser`, and its help text
+  says outdoor scenes. GI and sky light stay experimental.

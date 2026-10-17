@@ -7,7 +7,7 @@ compiled in. The game's menu only offers ray-traced reflections. This add-on
 exposes the rest through the engine's console variables, live, from a ReShade
 overlay tab.
 
-**Status: 0.4.0.** Tested in The Devil in Me. See [docs/FINDINGS.md](docs/FINDINGS.md)
+**Status: 0.4.1.** Tested in The Devil in Me. See [docs/FINDINGS.md](docs/FINDINGS.md)
 for how it works and what was found along the way.
 
 ## Install
@@ -18,11 +18,13 @@ or run `.\build.ps1 -Install`.
 ## Use
 Open ReShade (Home), go to the **DarkPicturesRT** tab.
 
-- **Presets** change reflections and AO; shadows and experiments stay as you set them.
+- **Presets** change reflections, translucency and AO; shadows and experiments stay as you set them.
   - *Game default*: everything back to the game's values.
   - *Sharper reflections*: the game's reflection algorithm at 50% resolution (the game uses 25%).
-  - *High*: the game's algorithm at full resolution, history weight 0.9 (game 0.95) to cut smearing.
-  - *Ultra*: full resolution, 16 resolve samples (the game uses 8), history weight 0.85; AO at 2 samples.
+  - *High*: reflections at full resolution, history weight 0.9 (game 0.95) to cut smearing;
+    ray traced translucency.
+  - *Ultra*: reflections at full resolution, 16 resolve samples (the game uses 8), history
+    weight 0.85; ray traced translucency; AO at 2 samples.
 
   All presets keep the game's fast deferred reflection algorithm. UE's standard
   algorithm is available as a setting, but it is very noisy in this game.
@@ -33,9 +35,11 @@ Open ReShade (Home), go to the **DarkPicturesRT** tab.
   spot lights on shadow maps (recommended): the game's key lights are spot lights,
   and with RT shadows some props, such as hats, lose their shadows from them (see
   FINDINGS).
-- **Experimental**: effects the game was cooked with but never turns on: ray traced
-  translucency (glass refraction), global illumination (brute force or final gather)
-  and sky light, with their quality settings. Untested; presets leave them alone.
+- **Translucency**: ray traced translucency, with refraction and max roughness. Fixes
+  glass that the game's raster translucency blows out to white (display cases).
+- **Experimental**: global illumination (brute force or final gather) with noise controls
+  (firefly suppression, final gather filter width and iterations, denoiser), and sky
+  light (for outdoor scenes; noisy indoors). Presets leave them alone.
 - **Diagnostics**: test switches and logging from the investigation.
 
 Overrides are saved in `ReShade.ini`, section `[DarkPicturesRT]`, and applied at

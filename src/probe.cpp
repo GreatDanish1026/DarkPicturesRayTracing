@@ -501,16 +501,19 @@ void DefineSettings() {
          "their shadows from them.",
          Kind::Toggle, 0},
 
-        // Experimental: effects the game was cooked with but never turns on. Untested here;
-        // presets leave them alone.
-        {"Experimental", L"r.RayTracing.Translucency", "Ray traced translucency",
-         "Refraction and reflections on glass. Replaces raster translucency entirely, so particles and fog "
-         "cards may change.",
+        // Translucency: tested; it fixes glass that raster translucency blows out to white
+        // (the pharmacy display cases). High and Ultra turn it on.
+        {"Translucency", L"r.RayTracing.Translucency", "Ray traced translucency",
+         "Proper reflections and refraction on glass; fixes display cases that render blown out. Replaces raster "
+         "translucency, so watch particles and fog.",
          Kind::Choice, 0, 0, {{-1, "Post-process volume"}, {0, "Off"}, {1, "On"}}},
-        {"Experimental", L"r.RayTracing.Translucency.Refraction", "Translucency: refraction", nullptr, Kind::Choice, 0, 0,
+        {"Translucency", L"r.RayTracing.Translucency.Refraction", "Refraction", nullptr, Kind::Choice, 0, 0,
          {{0, "Off"}, {1, "On"}}},
-        {"Experimental", L"r.RayTracing.Translucency.MaxRoughness", "Translucency: max roughness", nullptr, Kind::Float,
-         0, 1},
+        {"Translucency", L"r.RayTracing.Translucency.MaxRoughness", "Max roughness", nullptr, Kind::Float, 0, 1},
+
+        // Experimental: effects the game was cooked with but never turns on. Presets leave
+        // them alone. Tested: final gather GI is noisy as is; sky light is noisy indoors
+        // and looks good outdoors.
         {"Experimental", L"r.RayTracing.GlobalIllumination", "Ray traced global illumination",
          "Bounce light. Expensive; final gather is the cheaper method. The game's lighting is largely baked, "
          "so it may double up.",
@@ -520,8 +523,19 @@ void DefineSettings() {
         {"Experimental", L"r.RayTracing.GlobalIllumination.MaxBounces", "GI: bounces", nullptr, Kind::Int, 1, 4},
         {"Experimental", L"r.RayTracing.GlobalIllumination.ScreenPercentage", "GI: resolution (%)",
          "UE's default is 50.", Kind::Float, 25, 100},
-        {"Experimental", L"r.RayTracing.SkyLight", "Ray traced sky light", "Occlusion of sky lighting.", Kind::Toggle,
-         1},
+        {"Experimental", L"r.RayTracing.GlobalIllumination.FireflySuppression", "GI: firefly suppression",
+         "Tonemaps samples to suppress bright speckles.", Kind::Toggle, 1},
+        {"Experimental", L"r.RayTracing.GlobalIllumination.FinalGather.FilterWidth", "GI: filter width (final gather)",
+         "Neighbourhood for sample stealing between pixels. Default 0; higher is smoother and blurrier.", Kind::Int, 0,
+         8},
+        {"Experimental", L"r.RayTracing.GlobalIllumination.FinalGather.Iterations", "GI: iterations (final gather)",
+         "Iterations of gather point creation. More is less noisy and slower.", Kind::Int, 1, 8},
+        {"Experimental", L"r.RayTracing.GlobalIllumination.Denoiser", "GI: denoiser", nullptr, Kind::Choice, 0, 0,
+         {{0, "Off"}, {1, "On"}}},
+        {"Experimental", L"r.RayTracing.SkyLight", "Ray traced sky light",
+         "Occlusion of sky lighting. For outdoor scenes: indoors it is very noisy (tested).", Kind::Toggle, 1},
+        {"Experimental", L"r.RayTracing.SkyLight.Denoiser", "Sky light: denoiser", nullptr, Kind::Choice, 0, 0,
+         {{0, "Off"}, {1, "On"}}},
         {"Experimental", L"r.RayTracing.SkyLight.SamplesPerPixel", "Sky light: samples per pixel", nullptr, Kind::Int, 1,
          8},
 
@@ -557,12 +571,15 @@ const Preset kPresets[] = {
      {{L"r.RayTracing.Reflections.ScreenPercentage", 50}}},
     // At full resolution each output pixel gets 16x the game's rays, so the resolve needs
     // less history: the game's 0.95 history weight smears in motion there (tested).
-    {"High", "The game's fast algorithm at full resolution, with less history (0.9) to cut smearing.",
+    {"High", "Reflections at full resolution with less history (0.9) to cut smearing; ray traced translucency.",
      {{L"r.RayTracing.Reflections.ScreenPercentage", 100},
+      {L"r.RayTracing.Translucency", 1},
       {L"r.RayTracing.Reflections.ExperimentalDeferred.SpatialResolve.TemporalWeight", 0.9}}},
     {"Ultra",
-     "Full resolution with 16 resolve samples (the game uses 8) and history 0.85; AO at 2 samples.",
+     "Reflections at full resolution with 16 resolve samples (the game uses 8) and history 0.85; ray traced "
+     "translucency; AO at 2 samples.",
      {{L"r.RayTracing.Reflections.ScreenPercentage", 100},
+      {L"r.RayTracing.Translucency", 1},
       {L"r.RayTracing.Reflections.ExperimentalDeferred.SpatialResolve.NumSamples", 16},
       {L"r.RayTracing.Reflections.ExperimentalDeferred.SpatialResolve.TemporalWeight", 0.85},
       {L"r.RayTracing.AmbientOcclusion.SamplesPerPixel", 2}}},
@@ -1292,9 +1309,10 @@ void DrawOverlay(effect_runtime*) {
         if (ImGui::Button(kPresets[i].name)) ApplyPreset(kPresets[i]);
         ImGui::SetItemTooltip("%s", kPresets[i].help);
     }
-    ImGui::TextDisabled("Presets change reflections and AO; shadows and experiments stay as set below.");
+    ImGui::TextDisabled("Presets change reflections, translucency and AO; shadows and experiments stay as set below.");
 
     DrawGroup("Reflections", true);
+    DrawGroup("Translucency", true);
     DrawGroup("Ambient occlusion", true);
     DrawGroup("Shadows", true);
     DrawGroup("Experimental", false);
