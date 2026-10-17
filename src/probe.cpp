@@ -414,6 +414,8 @@ Override g_overrides[] = {
     {L"r.RayTracing.Shadows.EnableMaterials", "  Masked materials as opaque (...EnableMaterials 0)", L"0"},
     {L"r.RayTracing.Geometry.SkeletalMeshes", "  No skeletal meshes in RT scene (Geometry.SkeletalMeshes 0)", L"0"},
     {L"r.RayTracing.Geometry.StaticMeshes", "  No static meshes in RT scene (Geometry.StaticMeshes 0)", L"0"},
+    {L"r.RayTracing.Geometry.StaticMeshes.WPO", "  Hide WPO static meshes in RT scene (StaticMeshes.WPO 0)", L"0"},
+    {L"r.RayTracing.Geometry.InstancedStaticMeshes", "  No instanced static meshes in RT scene (InstancedStaticMeshes 0)", L"0"},
     {L"r.RayTracing.Geometry.NiagaraSprites", "  No Niagara sprites in RT scene (Geometry.NiagaraSprites 0)", L"0"},
     {L"r.RayTracing.Geometry.NiagaraMeshes", "  No Niagara meshes in RT scene (Geometry.NiagaraMeshes 0)", L"0"},
 };

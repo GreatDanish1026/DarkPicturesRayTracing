@@ -138,3 +138,38 @@ Each kind has its own vtable:
   (fixture) or "No skeletal meshes" (characters) fixes it with spot lights on RT, and
   whether point lights in lamps show the same thing elsewhere. A usable setting today:
   RT shadows with spot lights on shadow maps.
+- 0.1.2 fixture test (2026-10-17), RT shadows on with spot lights on RT:
+  **`r.RayTracing.Geometry.StaticMeshes 0` brings the key light back**; `SkeletalMeshes 0`
+  doesn't (mean luma: shadow maps 22.6, RT 21.3, RT without static meshes 22.4, RT
+  without skeletal meshes 21.3). So the blocker is a static mesh. Dropping all static
+  meshes isn't a fix: the hat (a static mesh on the mannequin) stops shadowing the eyes
+  too.
+  Remaining suspects: (a) the spotlight's own fixture or lens mesh around the light;
+  (b) a mesh moved by world position offset. Ray tracing evaluates WPO only for
+  components with `EvaluateWPO` enabled and within `r.RayTracing.Geometry.StaticMeshes.WPO.CullingRadius`
+  (50 m); every other WPO mesh is traced in its rest pose, so a curtain or blocker
+  animated out of the way in the material would still block the light; (c) an instanced
+  static mesh. `...StaticMeshes.WPO 0` hides WPO meshes that have `EvaluateWPO` on, and
+  `r.RayTracing.Geometry.InstancedStaticMeshes 0` drops instances.
+- 0.1.3 (2026-10-17), same scene, RT shadows on with spot lights on RT: `StaticMeshes.WPO 0`,
+  `InstancedStaticMeshes 0` and `NiagaraSprites 0` make no difference. Ruled out: instanced
+  meshes, WPO meshes that opt into ray tracing WPO, Niagara sprites, back faces, skeletal
+  meshes. Left: a plain static mesh that shadow maps ignore but rays hit. Most likely
+  the spotlight's own fixture or lens mesh around the light, or a WPO mesh traced in its
+  rest pose.
+
+## Next: stop shadow rays short of the light
+No cvar biases the light end of a shadow ray (`r.RayTracing.NormalBias` only moves the
+start). The fix is in the shader. The ray generation shader is UE's `FOcclusionRGS`
+(`/Engine/Private/RayTracing/RayTracingOcclusionRGS.usf`), so the plan is to stop each
+ray a few centimetres short of its sample point on the light (TMax minus a bias). That
+skips geometry right around the light, as shadow maps do in effect, and would also fix
+bulbs inside lamp meshes. ReShade 6.8 exposes D3D12 ray tracing pipelines (`create_pipeline`
+with `libraries` / `raygen_shader` subobjects, plus a `dispatch_rays` event), so this can
+use the same in-game replacement as AWTweaks:
+1. Probe: log every ray tracing pipeline (DXIL library sizes, hashes, export names) and
+   dump the libraries; find the one that exports `OcclusionRGS` and its permutations.
+2. Patch the DXIL offline (disassemble, change TMax at the `TraceRay` call, reassemble and
+   validate), and swap it in at `create_pipeline`.
+3. Expose the bias in the overlay, and test this scene with spot lights on RT.
+Meanwhile, RT shadows with spot lights on shadow maps works as it is.

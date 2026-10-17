@@ -5,8 +5,8 @@
 #define DPRT_GAMES "The Dark Pictures Anthology"
 #define DPRT_VERSION_MAJOR 0
 #define DPRT_VERSION_MINOR 1
-#define DPRT_VERSION_PATCH 2
-#define DPRT_VERSION "0.1.2"
+#define DPRT_VERSION_PATCH 3
+#define DPRT_VERSION "0.1.3"
 #define DPRT_RC_FILENAME "DarkPicturesRT.addon64"
 #define DPRT_RC_PRODUCT "DarkPicturesRT for The Dark Pictures Anthology"
 #define DPRT_RC_DESCRIPTION "DarkPicturesRT ReShade add-on"
