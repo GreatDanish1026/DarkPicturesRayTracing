@@ -115,6 +115,7 @@ constexpr GameInfo kGames[] = {
     {L"TheDevilInMe-Win64-Shipping.exe", "The Devil in Me"},  // SMG028, UE 4.26
 };
 
+const char* g_gameName = "";  // the kGames name of this executable, or ""
 const uint8_t* g_base = nullptr;
 uint32_t g_imageSize = 0;
 uint32_t g_timestamp = 0;
@@ -136,9 +137,10 @@ void LogGameInfo() {
     Log("exe: %s", Narrow(path).c_str());
     const wchar_t* file = wcsrchr(path, L'\\');
     file = file ? file + 1 : path;
-    const char* game = nullptr;
+    const char* game = nullptr;  // also kept in g_gameName for per-game preset rules
     for (const GameInfo& g : kGames)
         if (_wcsicmp(file, g.exe) == 0) game = g.name;
+    g_gameName = game ? game : "";
     Log("game: %s", game ? game : "not one this add-on is made for (UE 4.26 games may still work)");
     Log("exe: PE timestamp 0x%08x, image size 0x%x, base %p", g_timestamp, g_imageSize, g_base);
 }
@@ -505,8 +507,8 @@ void DefineSettings() {
         // Translucency: tested; it fixes glass that raster translucency blows out to white
         // (the pharmacy display cases). High and Ultra turn it on.
         {"Translucency", L"r.RayTracing.Translucency", "Ray traced translucency",
-         "Proper reflections and refraction on glass; fixes display cases that render blown out. Replaces raster "
-         "translucency, so watch particles and fog.",
+         "Proper reflections and refraction on glass; fixes display cases that render blown out (The Devil in "
+         "Me). Replaces all raster translucency: in House of Ashes it breaks the caves' haze and dust cards.",
          Kind::Choice, 0, 0, {{-1, "Post-process volume"}, {0, "Off"}, {1, "On"}}},
         {"Translucency", L"r.RayTracing.Translucency.Refraction", "Refraction", nullptr, Kind::Choice, 0, 0,
          {{0, "Off"}, {1, "On"}}},
@@ -569,17 +571,21 @@ struct Preset {
 };
 const Preset kPresets[] = {
     {"Game default", "Everything back to the game's own values.", {}},
-    {"Sharper reflections", "The game's fast algorithm at 50% resolution (the game uses 25%).",
-     {{L"r.RayTracing.Reflections.ScreenPercentage", 50}}},
+    // Negative values are relative: -2 = twice the game's value, capped at the setting's
+    // maximum (reflections run at 25% in The Devil in Me, 50% in House of Ashes).
+    {"Sharper reflections", "Twice the game's reflection resolution (up to 100%).",
+     {{L"r.RayTracing.Reflections.ScreenPercentage", -2}}},
     // At full resolution each output pixel gets 16x the game's rays, so the resolve needs
     // less history: the game's 0.95 history weight smears in motion there (tested).
-    {"High", "Reflections at full resolution with less history (0.9) to cut smearing; ray traced translucency.",
+    {"High",
+     "Reflections at full resolution with less history (0.9) to cut smearing; ray traced translucency "
+     "(The Devil in Me only).",
      {{L"r.RayTracing.Reflections.ScreenPercentage", 100},
       {L"r.RayTracing.Translucency", 1},
       {L"r.RayTracing.Reflections.ExperimentalDeferred.SpatialResolve.TemporalWeight", 0.9}}},
     {"Ultra",
      "Reflections at full resolution with 16 resolve samples (the game uses 8) and history 0.85; ray traced "
-     "translucency; AO at 2 samples.",
+     "translucency (The Devil in Me only); AO at 2 samples.",
      {{L"r.RayTracing.Reflections.ScreenPercentage", 100},
       {L"r.RayTracing.Translucency", 1},
       {L"r.RayTracing.Reflections.ExperimentalDeferred.SpatialResolve.NumSamples", 16},
@@ -722,17 +728,38 @@ void SaveSettings() {
     }
 }
 
+float GameValue(Setting& s);  // overlay helpers, below
+
+// Per-game preset rules: a cvar presets only set in the listed game, where it was tested.
+// RT translucency fixes glass in The Devil in Me but breaks House of Ashes' cave haze and
+// dust cards (raster-only depth fade), so presets leave it off elsewhere.
+struct PresetRule {
+    const wchar_t* cvar;
+    const char* onlyIn;
+};
+const PresetRule kPresetRules[] = {{L"r.RayTracing.Translucency", "The Devil in Me"}};
+
+// What preset p sets setting s to, if anything (after the per-game rules; relative values
+// resolved against the game's own value).
+bool PresetTarget(const Preset& p, Setting& s, float& out) {
+    for (const PresetRule& r : kPresetRules)
+        if (wcscmp(r.cvar, s.cvar) == 0 && strcmp(r.onlyIn, g_gameName) != 0) return false;
+    for (auto& [cvar, v] : p.values) {
+        if (wcscmp(cvar, s.cvar) != 0) continue;
+        out = v >= 0 ? static_cast<float>(v) : (std::min)(s.max, GameValue(s) * static_cast<float>(-v));
+        return true;
+    }
+    return false;
+}
+
 void ApplyPreset(const Preset& p) {
     for (Setting& s : g_settings) {
         if (!s.persist || strcmp(s.group, "Shadows") == 0 || strcmp(s.group, "Global illumination") == 0 ||
             strcmp(s.group, "Experimental") == 0)
             continue;  // presets leave shadows, GI and experiments alone
-        s.overridden = false;
-        for (auto& [cvar, v] : p.values)
-            if (wcscmp(cvar, s.cvar) == 0) {
-                s.overridden = true;
-                s.value = static_cast<float>(v);
-            }
+        float v;
+        s.overridden = PresetTarget(p, s, v);
+        if (s.overridden) s.value = v;
     }
     g_settingsDirty = true;
     Log("settings: preset \"%s\"", p.name);
@@ -1353,12 +1380,10 @@ bool IsPresetGroup(const Setting& s) {
 int ActivePreset() {
     for (size_t i = 0; i < sizeof(kPresets) / sizeof(kPresets[0]); ++i) {
         bool match = true;
-        for (const Setting& s : g_settings) {
+        for (Setting& s : g_settings) {
             if (!IsPresetGroup(s)) continue;
-            const double* want = nullptr;
-            for (auto& [cvar, v] : kPresets[i].values)
-                if (wcscmp(cvar, s.cvar) == 0) want = &v;
-            if (want ? !(s.overridden && fabsf(s.value - static_cast<float>(*want)) < 1e-4f) : s.overridden) {
+            float want;
+            if (PresetTarget(kPresets[i], s, want) ? !(s.overridden && fabsf(s.value - want) < 1e-3f) : s.overridden) {
                 match = false;
                 break;
             }
@@ -1426,7 +1451,8 @@ void DrawSimple() {
         }
         bool glass = IsOn(L"r.RayTracing.Translucency", 1);
         if (SwitchRow("Ray traced translucency", &glass, "glass",
-                      "Proper reflections and refraction on glass; fixes display cases that render blown out."))
+                      "Proper reflections and refraction on glass; fixes display cases that render blown out "
+                      "(The Devil in Me). In House of Ashes it breaks the caves' haze and dust cards."))
             SetOverride(L"r.RayTracing.Translucency", glass, 1);
 
         ImGui::TableNextColumn();

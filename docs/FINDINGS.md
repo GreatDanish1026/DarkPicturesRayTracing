@@ -466,3 +466,18 @@ shadows (with spots on shadow maps), translucency and sky light, an Off / Final 
 two-click "Reset all". The per-setting sections are behind "Show advanced settings" and the
 investigation tools behind "Show diagnostics"; both choices are saved (`ShowAdvanced`,
 `ShowDiagnostics`). _Pending user review._
+
+## House of Ashes (SMG025) (2026-10-17)
+- Same base: UE 4.26 (`++UE4+Release-4.26`), Supermassive's GI cvars, SteamStub (`.bind`), D3D12
+  with ReShade 6.8.0, and the same `RTReflectionsQuality` menu option. **0.5.0 worked unchanged:**
+  `IConsoleManager::Singleton` at exe+0x6dd2e20 (found by signature), 222 cvars in the same six
+  storage types, and every setting reached the renderer.
+- Stock differences from The Devil in Me: `r.RayTracing.Reflections.ScreenPercentage` **50** (Devil
+  in Me 25), `r.SkinCache.Mode` 2 (1). The cvar set is otherwise the same.
+- **RT translucency breaks the cave scenes** (screenshot 15:13:51): a big haze card renders as a
+  bright rectangle with a hard edge, and soft cave-silhouette cards render as flat dark shapes in
+  mid-air. RT translucency replaces all raster translucency, and these cards rely on raster-only
+  depth fade and blending. Presets, shadows and GI otherwise "mostly looking good".
+- 0.5.1: per-game preset rules (`kPresetRules`): presets set `r.RayTracing.Translucency` only in The
+  Devil in Me. *Sharper reflections* is relative (negative preset value = multiple of the game's
+  value, capped): twice the game's reflection resolution. The translucency tooltips name both games.
