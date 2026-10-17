@@ -34,6 +34,20 @@ cmd /c $cmd
 if ($LASTEXITCODE) { throw "add-on build failed" }
 Write-Host "Built $addon ($name $((Get-Item $addon).VersionInfo.FileVersion))"
 
+# tools\dxilasm.exe: assembles and signs patched DXIL with the Windows SDK's DXC.
+$sdkInclude = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\Include\*\um\dxcapi.h" -ErrorAction SilentlyContinue |
+    Sort-Object FullName | Select-Object -Last 1
+if (-not $sdkInclude) { throw "dxcapi.h not found (Windows 10/11 SDK)." }
+$toolCmd = @(
+    "call `"$vcvars`" >nul",
+    ("cl /nologo /std:c++17 /O2 /EHsc /MT /W3 /D_CRT_SECURE_NO_WARNINGS /DUNICODE /D_UNICODE " +
+     "/I `"$($sdkInclude.DirectoryName)`" /Fo`"$obj\\`" `"$root\tools\dxilasm.cpp`" " +
+     "/link /OUT:`"$root\bin\dxilasm.exe`" ole32.lib")
+) -join " && "
+cmd /c $toolCmd
+if ($LASTEXITCODE) { throw "dxilasm build failed" }
+Write-Host "Built $root\bin\dxilasm.exe"
+
 if ($Install) {
     $exe = $exes | Where-Object { Test-Path "$GameBin\$_" } | Select-Object -First 1
     if (-not $exe) { throw "None of $($exes -join ', ') found in $GameBin (pass -GameBin)" }

@@ -181,7 +181,7 @@ Meanwhile, RT shadows with spot lights on shadow maps works as it is.
   dispatched handles aren't any pipeline seen in `init_pipeline`. To replace a shader,
   swap its code inside its collection at `create_pipeline`; the linked pipeline then
   picks it up.
-- Raygen exports seen: `OcclusionRGS` (96 collections, **80 distinct libraries**),
+- Raygen exports seen: `OcclusionRGS` (**96 collections, each with its own library**),
   `AmbientOcclusionRGS` 4, `RayTracingDeferredReflectionsRGS` 3, `RayTracingReflectionsRGS` 1,
   `GlobalIlluminationRGS` 2, `RayTracingCreateGatherPointsTraceRGS` 4. The `OcclusionRGS`
   collections are created the moment RT shadows are first turned on.
@@ -193,7 +193,7 @@ Meanwhile, RT shadows with spot lights on shadow maps works as it is.
   position from cbuffer register 7 plus a jittered offset across the light's shape)
   minus the surface point. **Nothing biases the light end**, so anything wrapped around
   the light (a fixture) blocks the ray. That matches the 0.1.x tests.
-- Across the 80 permutations, 2, 4, 5 or 7 `TraceRay` calls take TMax from: `Sqrt`
+- Across the first 80 permutations checked, 2, 4, 5 or 7 `TraceRay` calls take TMax from: `Sqrt`
   (distance to the light), `phi` of such values (branches), constants or `FMin` (opcode
   36; directional / capped distance), and `5.0 - x` (short extra rays, probably hair or
   transmission).
@@ -205,8 +205,19 @@ Meanwhile, RT shadows with spot lights on shadow maps works as it is.
 For each `TraceRay` whose TMax comes from a `Sqrt` (directly or through a `phi`), replace
 TMax with `max(TMin + epsilon, TMax - Bias)` (FMax, opcode 35), with Bias in cm (UE units).
 Leave constants, `FMin` and `5.0 - x` TMax alone. Steps:
-1. A round-trip test on all 80 unmodified libraries: dumpbin → assemble → sign →
+1. A round-trip test on all unmodified libraries: dumpbin → assemble → sign →
    dumpbin, with matching IR. If they don't round-trip, the approach is no good.
 2. Patched sets at a few biases (for example 10, 25, 50 cm), and the add-on swapping them
    in at `create_pipeline` by library hash. Changing the bias needs a restart, because the
    collections are created once.
+
+### Round trip (tools/dxilasm.exe, tools/roundtrip.py; 2026-10-17)
+- `dxilasm` assembles `dxc -dumpbin` output with the SDK's `IDxcAssembler` (10.0.26100.0)
+  and signs it with `IDxcValidator` (`DxcValidatorFlags_InPlaceEdit`).
+- **All 96 `OcclusionRGS` libraries pass:** the reassembled IR matches the original line
+  for line (comments dropped), and `RDAT` and `SFI0` are byte-identical. In every case
+  the bitcode re-encodes slightly smaller, the debug name part `ILDN` is dropped, and a
+  statistics part `STAT` (about 4 KB) is added. D3D12 doesn't read either part.
+- Not yet shown: that D3D12 accepts a reassembled library in the game. The first in-game
+  test can swap in the unmodified round-tripped set, then the patched one.
+
