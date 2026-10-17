@@ -493,3 +493,11 @@ investigation tools behind "Show diagnostics"; both choices are saved (`ShowAdva
   ordering. Not yet tested: translucency off in the same spot, and the game's DOF option off.
 - No add-on change was needed: the preset rule already limits translucency to The Devil in Me.
   0.5.2 names Little Hope in the tooltips.
+
+## Man of Medan (SMG019) (2026-10-17)
+- Same base (UE 4.26, SteamStub with an extra `.rodata` section, ReShade 6.8.0 on D3D12,
+  `RTReflectionsQuality`). **0.5.2 worked unchanged:** singleton at exe+0x70808a8, 223 cvars, reflections at
+  25% like The Devil in Me. "Looks good"; **RT translucency has to stay off** here as well.
+- So RT translucency breaks atmospheric translucency in three of the four games. The Devil in Me
+  was tested in a single scene (glass, little atmosphere), so it may break there too in foggy
+  or dusty scenes.
