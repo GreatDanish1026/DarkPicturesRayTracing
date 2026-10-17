@@ -452,9 +452,10 @@ void DefineSettings() {
         {"Reflections", L"r.RayTracing.Reflections", "Ray traced reflections",
          "The game's menu sets this (RT Reflections). Overriding locks it.", Kind::Choice, 0, 0, gameOffOn},
         {"Reflections", L"r.RayTracing.Reflections.ExperimentalDeferred", "Algorithm",
-         "Fast deferred (the game's choice) supports a subset of features. Standard supports samples, bounces and "
-         "shadows in reflections, and needs a denoiser.",
-         Kind::Choice, 0, 0, {{1, "Fast deferred"}, {0, "Standard"}}},
+         "Fast deferred is the game's choice, with its own spatial and temporal resolve. Standard supports samples, "
+         "bounces and shadows in reflections, but with UE 4.26's denoiser it is very noisy in this game's dark "
+         "scenes, and glass smears (tested).",
+         Kind::Choice, 0, 0, {{1, "Fast deferred"}, {0, "Standard (noisy)"}}},
         {"Reflections", L"r.RayTracing.Reflections.ScreenPercentage", "Resolution (%)",
          "Percentage of the render resolution reflections are traced at. The game uses 25.", Kind::Float, 25, 100},
         {"Reflections", L"r.RayTracing.Reflections.MaxRoughness", "Max roughness",
@@ -466,8 +467,20 @@ void DefineSettings() {
         {"Reflections", L"r.RayTracing.Reflections.MaxBounces", "Bounces (standard)", nullptr, Kind::Int, 1, 4},
         {"Reflections", L"r.RayTracing.Reflections.Shadows", "Shadows in reflections (standard)", nullptr, Kind::Choice,
          0, 0, {{-1, "Post-process volume"}, {0, "Off"}, {1, "Hard"}, {2, "Soft (area)"}}},
-        {"Reflections", L"r.RayTracing.Reflections.ExperimentalDeferred.SpatialResolve", "Spatial resolve (deferred)",
-         "The deferred algorithm's own denoising filter.", Kind::Toggle, 1},
+        {"Reflections", L"r.RayTracing.Reflections.ExperimentalDeferred.SpatialResolve.NumSamples",
+         "Resolve samples (deferred)", "Samples of the deferred algorithm's spatial resolve. The game uses 8.",
+         Kind::Int, 4, 32},
+        {"Reflections", L"r.RayTracing.Reflections.ExperimentalDeferred.SpatialResolve.MaxRadius",
+         "Resolve radius (deferred)", "Maximum resolve radius in pixels (rougher surfaces use more). The game uses 8.",
+         Kind::Float, 2, 16},
+        {"Reflections", L"r.RayTracing.Reflections.ExperimentalDeferred.SpatialResolve.TemporalQuality",
+         "Temporal accumulation (deferred)", nullptr, Kind::Choice, 0, 0,
+         {{0, "Off"}, {1, "Tiles (low)"}, {2, "Randomized tiles (medium)"}}},
+        {"Reflections", L"r.RayTracing.Reflections.ExperimentalDeferred.SpatialResolve.TemporalWeight",
+         "History weight (deferred)", "Weight of the previous frames. Higher is smoother but smears in motion. "
+         "The game uses 0.95.", Kind::Float, 0.5f, 0.99f},
+        {"Reflections", L"r.Reflections.Denoiser.ReconstructionSamples", "Denoiser samples (standard)",
+         "Reconstruction samples of UE's reflection denoiser. Default 8.", Kind::Int, 4, 32},
 
         // Ambient occlusion: the game already enables RT AO through its settings.
         {"Ambient occlusion", L"r.RayTracing.AmbientOcclusion", "Ray traced AO", nullptr, Kind::Choice, 0, 0, gameOffOn},
@@ -512,30 +525,16 @@ struct Preset {
 };
 const Preset kPresets[] = {
     {"Game default", "Everything back to the game's own values.", {}},
-    {"Sharper reflections", "The game's fast algorithm at twice the resolution.",
+    {"Sharper reflections", "The game's fast algorithm at 50% resolution (the game uses 25%).",
      {{L"r.RayTracing.Reflections.ScreenPercentage", 50}}},
-    {"High",
-     "Standard reflections at full resolution with the screen-space denoiser and hard shadows; AO at 2 samples.",
-     {{L"r.RayTracing.Reflections.ExperimentalDeferred", 0},
-      {L"r.RayTracing.Reflections.ScreenPercentage", 100},
-      {L"r.Reflections.Denoiser", 2},
-      {L"r.RayTracing.Reflections.MaxRoughness", 0.6f},
-      {L"r.RayTracing.Reflections.SamplesPerPixel", 1},
-      {L"r.RayTracing.Reflections.MaxBounces", 1},
-      {L"r.RayTracing.Reflections.Shadows", 1},
+    {"High", "The game's fast algorithm at full resolution.", {{L"r.RayTracing.Reflections.ScreenPercentage", 100}}},
+    {"Ultra", "Full resolution with 16 resolve samples (the game uses 8); AO at 2 samples.",
+     {{L"r.RayTracing.Reflections.ScreenPercentage", 100},
+      {L"r.RayTracing.Reflections.ExperimentalDeferred.SpatialResolve.NumSamples", 16},
       {L"r.RayTracing.AmbientOcclusion.SamplesPerPixel", 2}}},
-    {"Ultra", "High with 2 bounces, 2 reflection samples, soft shadows in reflections, and AO at 4 samples.",
-     {{L"r.RayTracing.Reflections.ExperimentalDeferred", 0},
-      {L"r.RayTracing.Reflections.ScreenPercentage", 100},
-      {L"r.Reflections.Denoiser", 2},
-      {L"r.RayTracing.Reflections.MaxRoughness", 0.8f},
-      {L"r.RayTracing.Reflections.SamplesPerPixel", 2},
-      {L"r.RayTracing.Reflections.MaxBounces", 2},
-      {L"r.RayTracing.Reflections.Shadows", 2},
-      {L"r.RayTracing.AmbientOcclusion.SamplesPerPixel", 4}}},
 };
 
-bool IsFloat(void* var) { return cvars::AsData(var, true) != nullptr; }
+bool IsFloat(void* var) { return cvars::IsFloatVar(var); }
 
 // The value the renderer reads, as text in the cvar's own type (for Set and the log).
 std::wstring RenderText(void* var) {

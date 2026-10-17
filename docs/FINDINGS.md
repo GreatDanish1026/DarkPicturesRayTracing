@@ -411,3 +411,20 @@ Leave constants, `FMin` and `5.0 - x` TMax alone. Steps:
   (`ExperimentalDeferred 0`) with `r.Reflections.Denoiser 2`, which is needed for it, at
   100%, plus samples, bounces and shadows in reflections. AO: samples per pixel 2 / 4.
   _Not yet tested in game: image quality and frame cost of each preset._
+- **0.3.0 test: High and Ultra (standard reflection algorithm) are very noisy** on
+  reflective surfaces. In the pharmacy (Act 1 hotel), the display-case glass turns flat
+  and over-bright with blotchy smearing. The denoiser runs with stock settings
+  (`r.Reflections.Denoiser 2`, `.ReconstructionSamples 8`, `.PreConvolution 1`,
+  `.TemporalAccumulation 1`); UE 4.26's reflection denoiser just doesn't hold up at 1–2
+  samples in these dark, small-light scenes. The deferred algorithm the game uses brings
+  its own resolve: `ExperimentalDeferred.SpatialResolve 1`, `.NumSamples 8`, `.MaxRadius 8`,
+  `.TemporalQuality 2`, `.TemporalWeight 0.95`, plus `.Glossy 1`, `.AnyHitMaxRoughness 0.1`,
+  `.MipBias 1`.
+- Settings bug found in the same log: `MaxRoughness` is a float **Ref** cvar, but floats were
+  only detected for data cvars, so it was read back as int bits (0.8f → 1061997773), "repaired"
+  every second, and would have been released to -1082130432. Fixed in 0.3.1 with
+  `cvars::IsFloatVar`: for Ref cvars it checks that `GetFloat` (+0x98) starts with `movss` (F3 0F 10).
+- 0.3.1 presets stay on the deferred algorithm: Sharper = 50%, High = 100%, Ultra = 100% with
+  16 resolve samples and AO at 2 samples. New settings: deferred resolve samples, radius,
+  temporal quality and history weight, and the standard denoiser's reconstruction samples.
+  The standard algorithm remains a setting, labelled noisy. _Pending in-game test._

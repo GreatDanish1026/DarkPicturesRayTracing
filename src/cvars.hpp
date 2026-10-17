@@ -191,6 +191,18 @@ inline bool MirrorToRenderer(void* var) {
     return SafeCopy(value, s.main, s.size) && SafeCopy(s.render, value, s.size);
 }
 
+// Whether the cvar holds a float. Data cvars say so through AsVariableFloat; Ref cvars
+// don't, so this looks at their GetFloat (+0x98): a float Ref's is movss xmm0,[rcx+0x50]
+// (F3 0F 10), an int Ref's converts (movd + cvtdq2ps), a bool Ref's uses movzx.
+inline bool IsFloatVar(void* var) {
+    if (AsData(var, true)) return true;
+    if (AsData(var, false)) return false;
+    const uint8_t* fn = nullptr;
+    uint8_t code[3] = {};
+    return SafeCopy(&fn, *reinterpret_cast<uint8_t**>(var) + kGetFloat, sizeof(fn)) && SafeCopy(code, fn, 3) &&
+           code[0] == 0xF3 && code[1] == 0x0F && code[2] == 0x10;
+}
+
 // The value the renderer reads, as an int (bool and int cvars).
 inline bool RenderInt(void* var, int32_t& out) {
     Storage s;
