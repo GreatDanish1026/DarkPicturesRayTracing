@@ -21,7 +21,7 @@ Open ReShade (Home), go to the **DarkPicturesRT** tab. The tab opens in a simple
 - **Quality**: presets for reflections, translucency and AO. The button matching the
   current settings is highlighted ("custom" if none does).
   - *Game default*: the game's own settings.
-  - *Sharper*: the game's reflections at 50% resolution (the game uses 25%).
+  - *Sharper reflections*: the game's reflections at 50% resolution (the game uses 25%).
   - *High*: reflections at full resolution with less history (0.9, game 0.95) to cut
     smearing; ray traced translucency.
   - *Ultra*: High with 16 reflection resolve samples (game 8), history 0.85, and AO at 2 samples.
