@@ -221,3 +221,40 @@ Leave constants, `FMin` and `5.0 - x` TMax alone. Steps:
 - Not yet shown: that D3D12 accepts a reassembled library in the game. The first in-game
   test can swap in the unmodified round-tripped set, then the patched one.
 
+
+### Shader replacement
+- 0.2.1 swapped the code in ReShade's `create_pipeline`. All the `OcclusionRGS` collections
+  built with the round-tripped libraries were **created** (`init_pipeline` saw them), but
+  then the game hit a fatal error: `RayTracingDevice->CreateStateObject(...) failed ...
+  D3D12RayTracing.cpp:359 with error E_INVALIDARG`. That's the call that links the
+  collections into the final pipeline, which add-ons never see. Cause (inferred): when an
+  add-on edits a description, ReShade rebuilds the state object from its generic
+  subobject model (in the log, the collections carry subobject types ReShade doesn't
+  model as shaders: `flags` (33) and an empty `dynamic_pipeline_states` (18)). That loses
+  details the collections need for linking. The reassembled libraries themselves were
+  accepted.
+- 0.2.2–0.2.5 hooked the wrong vtable slot. I took slot 66 from counting the C
+  `ID3D12Device5Vtbl` struct in d3d12.h, but MSVC's C++ vtable orders the methods
+  differently: `CreateStateObject` is called at offset 0x1f0, **slot 62**, and slot 66 is
+  `ID3D12Device7::AddToStateObject` (62 CreateStateObject, 63
+  GetRaytracingAccelerationStructurePrebuildInfo, 64 CheckDriverMatchingIdentifier,
+  65 SetBackgroundProcessingMode, 66 AddToStateObject). That accounts for every symptom
+  I had explained some other way:
+  - 0.2.2's boot crash (`AddToStateObject ... 8000FFFF`): a 4-argument hook passed `riid`
+    where `AddToStateObject` expects the state object to grow from. It wasn't "hidden
+    runtime arguments"; 0.2.3's forwarding of extra slots only happened to restore the
+    real call.
+  - The hook saw only type-3 descriptions made of existing collections: those are the
+    game's `AddToStateObject` calls. Collection creation goes through slot 62, which was
+    never hooked. It wasn't a separate vtable or a pointer cached by ReShade. 0.2.4
+    showed that every interface version shares one vtable in D3D12Core.dll.
+  - The 0.2.5 inline detour sat on `AddToStateObject`'s function, so the probe's
+    `CreateStateObject` call never reached it.
+  Found by disassembling `tools\d3d12probe` (capstone): its three `CreateStateObject`
+  calls are `call [rax+0x1f0]`.
+- 0.2.6: a plain vtable hook on slot 62 with the real 4-argument signature. It swaps
+  `D3D12_DXIL_LIBRARY_DESC::DXILLibrary` in the game's own description for the length of
+  the call, then restores it. `tools\d3d12probe --hook-test` patches the slot, calls
+  `CreateStateObject` through the C++ interface, and checks that the hook ran exactly once
+  with an unchanged result: **PASS** on D3D12Core 6.2.26100.9549 (slot 62 → rva 0xcef90).
+  _Pending in-game run with the 96 round-tripped libraries._

@@ -8,3 +8,4 @@ bin/
 DarkPicturesRT*.log
 DarkPicturesRT_text_*.bin
 DarkPicturesRT_dxil/
+DarkPicturesRT_shaders/

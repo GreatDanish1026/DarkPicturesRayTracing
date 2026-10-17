@@ -12,6 +12,9 @@
 //                          is SteamStub-encrypted, so vtable entries can only be
 //                          disassembled from memory
 //
+//   DarkPicturesRT_shaders\<hash>.dxil (read, not written)
+//                          replacement ray tracing libraries, matched by the original's
+//                          hash (see "shader replacement")
 //   DarkPicturesRT_dxil\<hash>.dxil, index.txt
 //                          every ray tracing DXIL library the game creates, once, with
 //                          its export names (see "ray tracing pipelines")
@@ -25,6 +28,7 @@
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <d3d12.h>
 
 #define ImTextureID ImU64
 #include <imgui.h>
@@ -598,6 +602,177 @@ bool IsShaderSubobject(pipeline_subobject_type t) {
     return t >= pipeline_subobject_type::raygen_shader && t <= pipeline_subobject_type::callable_shader;
 }
 
+// ---------------------------------------------------------------- shader replacement
+
+// DarkPicturesRT_shaders\<hash>.dxil next to the game exe replaces the ray tracing
+// library whose code hashes (Fnv1a, as in the dumps) to <hash>. Loaded once at start; to
+// turn replacement off, rename or remove the folder.
+//
+// The swap happens in a hook on the real device's ID3D12Device5::CreateStateObject, not
+// in ReShade's create_pipeline: when an add-on edits a description there, ReShade
+// rebuilds the state object from its generic subobject model, which loses details UE's
+// collections rely on, and linking the collections then fails with E_INVALIDARG (0.2.1).
+// The hook changes only the bytecode pointer in the game's own D3D12_DXIL_LIBRARY_DESC
+// for the length of the call, so everything else stays as UE wrote it. ReShade's events
+// still see the original code, so the dumps and the pipeline log are unaffected.
+
+struct Replacement {
+    std::vector<uint8_t> code;  // lives until unload: D3D12 reads it during creation
+    uint32_t swapped = 0;       // state objects created with it
+    uint32_t accepted = 0;      // ... successfully
+};
+std::map<uint64_t, Replacement> g_replacements;  // original hash -> replacement
+
+void LoadReplacements() {
+    std::wstring dir = g_dir + L"" DPRT_PRODUCT "_shaders\\";
+    WIN32_FIND_DATAW fd;
+    HANDLE find = FindFirstFileW((dir + L"*.dxil").c_str(), &fd);
+    if (find == INVALID_HANDLE_VALUE) {
+        Log("shaders: no " DPRT_PRODUCT "_shaders folder, the game's ray tracing shaders run unchanged");
+        return;
+    }
+    do {
+        uint64_t original = wcstoull(fd.cFileName, nullptr, 16);
+        FILE* f = _wfopen((dir + fd.cFileName).c_str(), L"rb");
+        if (!original || !f) {
+            if (f) fclose(f);
+            continue;
+        }
+        Replacement& r = g_replacements[original];
+        r.code.resize(fd.nFileSizeLow);
+        bool ok = fread(r.code.data(), 1, r.code.size(), f) == r.code.size();
+        fclose(f);
+        if (!ok || r.code.size() < 32 || memcmp(r.code.data(), "DXBC", 4) != 0) {
+            Log("shaders: skipping %s (not a DXIL container)", Narrow(fd.cFileName).c_str());
+            g_replacements.erase(original);
+        }
+    } while (FindNextFileW(find, &fd));
+    FindClose(find);
+    Log("shaders: %zu replacement libraries loaded from " DPRT_PRODUCT "_shaders", g_replacements.size());
+}
+
+// Slot 62 in MSVC's C++ vtable (call offset 0x1f0), checked on this machine with
+// tools\d3d12probe --hook-test. Not the C ID3D12Device5Vtbl struct in d3d12.h: its order
+// differs, and counting it gave 66, which in the C++ layout is ID3D12Device7::
+// AddToStateObject. 0.2.2-0.2.5 hooked that by mistake, which is why the hook saw only
+// state objects growing from existing collections, and why its 4-argument signature
+// broke AddToStateObject (its second argument is the state object to grow from).
+constexpr size_t kCreateStateObjectSlot = 62;
+using CreateStateObjectFn = HRESULT(STDMETHODCALLTYPE*)(ID3D12Device5*, const D3D12_STATE_OBJECT_DESC*, REFIID,
+                                                         void**);
+CreateStateObjectFn g_createStateObject = nullptr;  // the original
+void** g_hookedSlot = nullptr;                      // the vtable entry we replaced
+uint32_t g_links = 0, g_linkFailures = 0;  // state objects that link existing collections
+volatile long g_hookCalls = 0;             // all calls through the hook
+
+HRESULT STDMETHODCALLTYPE HookCreateStateObject(ID3D12Device5* self, const D3D12_STATE_OBJECT_DESC* desc,
+                                                REFIID riid, void** out) {
+    struct Swap {
+        D3D12_DXIL_LIBRARY_DESC* lib;
+        D3D12_SHADER_BYTECODE original;
+        uint64_t hash;
+        Replacement* r;
+    };
+    Swap swaps[16];
+    int swapCount = 0;
+    bool links = false;
+    if (desc) {
+        for (UINT i = 0; i < desc->NumSubobjects; ++i) {
+            const D3D12_STATE_SUBOBJECT& so = desc->pSubobjects[i];
+            if (so.Type == D3D12_STATE_SUBOBJECT_TYPE_EXISTING_COLLECTION) links = true;
+            if (so.Type != D3D12_STATE_SUBOBJECT_TYPE_DXIL_LIBRARY || !so.pDesc || g_replacements.empty() ||
+                swapCount == 16)
+                continue;
+            // In place: associations elsewhere in the description point at these subobjects.
+            auto lib = static_cast<D3D12_DXIL_LIBRARY_DESC*>(const_cast<void*>(so.pDesc));
+            if (!lib->DXILLibrary.pShaderBytecode) continue;
+            uint64_t hash = Fnv1a(lib->DXILLibrary.pShaderBytecode, lib->DXILLibrary.BytecodeLength);
+            auto it = g_replacements.find(hash);
+            if (it == g_replacements.end()) continue;
+            swaps[swapCount++] = {lib, lib->DXILLibrary, hash, &it->second};
+            lib->DXILLibrary = {it->second.code.data(), it->second.code.size()};
+        }
+    }
+    HRESULT hr = g_createStateObject(self, desc, riid, out);
+    for (int i = 0; i < swapCount; ++i) swaps[i].lib->DXILLibrary = swaps[i].original;
+
+    // What reaches the hook, for diagnosis: the first calls, and the first calls with libraries.
+    bool hasLibrary = false;
+    for (UINT i = 0; desc && i < desc->NumSubobjects; ++i)
+        hasLibrary |= desc->pSubobjects[i].Type == D3D12_STATE_SUBOBJECT_TYPE_DXIL_LIBRARY;
+    static volatile long libraryCalls = 0;
+    long calls = InterlockedIncrement(&g_hookCalls);
+    if (desc && (calls <= 8 || (hasLibrary && InterlockedIncrement(&libraryCalls) <= 8))) {
+        std::string types;
+        for (UINT i = 0; i < desc->NumSubobjects; ++i)
+            types += (types.empty() ? "" : ",") + std::to_string(desc->pSubobjects[i].Type);
+        Log("shaders: hook call %ld: type %d, subobjects %s, %d replaced, 0x%08lx", calls,
+            static_cast<int>(desc->Type), types.c_str(), swapCount, static_cast<unsigned long>(hr));
+    }
+
+    if (swapCount || links || FAILED(hr)) {
+        std::lock_guard lock(g_rtMutex);
+        for (int i = 0; i < swapCount; ++i) {
+            Replacement& r = *swaps[i].r;
+            ++r.swapped;
+            if (SUCCEEDED(hr) && ++r.accepted == 1)
+                Log("shaders: replacement for %016llx accepted by D3D12", static_cast<unsigned long long>(swaps[i].hash));
+        }
+        if (links) {
+            ++g_links;
+            if (FAILED(hr)) ++g_linkFailures;
+        }
+        if (FAILED(hr)) {
+            std::string types;
+            for (UINT i = 0; desc && i < desc->NumSubobjects; ++i)
+                types += (types.empty() ? "" : ",") + std::to_string(desc->pSubobjects[i].Type);
+            Log("shaders: CreateStateObject (type %d, subobjects %s) FAILED 0x%08lx with %d replaced libraries",
+                desc ? static_cast<int>(desc->Type) : -1, types.c_str(), static_cast<unsigned long>(hr), swapCount);
+        } else if (links && g_links <= 3) {
+            Log("shaders: linked a pipeline from existing collections (type %d, %u subobjects)",
+                static_cast<int>(desc->Type), desc->NumSubobjects);
+        }
+    }
+    return hr;
+}
+
+bool PatchSlot(void** slot, void* value) {
+    DWORD old;
+    if (!VirtualProtect(slot, sizeof(void*), PAGE_READWRITE, &old)) return false;
+    *slot = value;
+    VirtualProtect(slot, sizeof(void*), old, &old);
+    return true;
+}
+
+// All of the device's interface versions share one vtable in D3D12Core.dll (0.2.4 log),
+// so one entry covers every caller, ReShade included.
+void InstallStateObjectHook(device* dev) {
+    if (g_hookedSlot || g_replacements.empty() || dev->get_api() != device_api::d3d12) return;
+    auto native = reinterpret_cast<ID3D12Device*>(dev->get_native());
+    ID3D12Device5* device5 = nullptr;
+    if (!native || FAILED(native->QueryInterface(IID_PPV_ARGS(&device5)))) {
+        Log("shaders: no ID3D12Device5 (no ray tracing), replacements unused");
+        return;
+    }
+    void** slot = *reinterpret_cast<void***>(device5) + kCreateStateObjectSlot;
+    device5->Release();
+    void* original = *slot;
+    if (!PatchSlot(slot, reinterpret_cast<void*>(&HookCreateStateObject))) {
+        Log("shaders: cannot hook CreateStateObject (VirtualProtect failed)");
+        return;
+    }
+    g_createStateObject = reinterpret_cast<CreateStateObjectFn>(original);
+    g_hookedSlot = slot;
+    Log("shaders: hooked ID3D12Device5::CreateStateObject (vtable slot %zu)", kCreateStateObjectSlot);
+}
+
+// The vtable would otherwise point into the unloaded add-on.
+void RemoveStateObjectHook() {
+    if (!g_hookedSlot) return;
+    PatchSlot(g_hookedSlot, reinterpret_cast<void*>(g_createStateObject));
+    g_hookedSlot = nullptr;
+}
+
 void OnInitPipeline(device*, pipeline_layout layout, uint32_t count, const pipeline_subobject* subobjects,
                     pipeline pipe) {
     bool rt = false;
@@ -725,6 +900,7 @@ void OnInitDevice(device* dev) {
     Log("device created: %s", dev->get_api() == device_api::d3d12 ? "Direct3D 12"
                               : dev->get_api() == device_api::d3d11 ? "Direct3D 11 (ray tracing needs -dx12)"
                                                                     : "other API");
+    InstallStateObjectHook(dev);
 }
 
 void OnPresent(command_queue*, swapchain*, const rect*, const rect*, uint32_t, const rect*) {
@@ -757,6 +933,19 @@ void DrawOverlay(effect_runtime*) {
     {
         std::lock_guard rtLock(g_rtMutex);
         ImGui::Text("Ray tracing pipelines: %u, DXIL libraries dumped: %zu", g_rtPipelines, g_dumped.size());
+        if (!g_replacements.empty()) {
+            uint32_t swapped = 0, accepted = 0;
+            for (auto& [hash, r] : g_replacements) {
+                swapped += r.swapped != 0;
+                accepted += r.accepted != 0;
+            }
+            ImGui::Text("Replacement shaders: %zu loaded, %u swapped in, %u accepted; %u links, %u failed",
+                        g_replacements.size(), swapped, accepted, g_links, g_linkFailures);
+            if (!g_hookedSlot)
+                ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.3f, 1.0f), "CreateStateObject not hooked: see the log");
+            if (swapped != accepted || g_linkFailures)
+                ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.3f, 1.0f), "A state object with replacements failed: see the log");
+        }
     }
     if (ImGui::Button("Log ray dispatches (one frame)") && g_capture == kCaptureOff) g_capture = kCaptureArmed;
 
@@ -772,6 +961,7 @@ void Install() {
     LogGameInfo();
     reshade::register_event<reshade::addon_event::init_device>(&OnInitDevice);
     reshade::register_event<reshade::addon_event::present>(&OnPresent);
+    LoadReplacements();
     reshade::register_event<reshade::addon_event::init_pipeline>(&OnInitPipeline);
     reshade::register_event<reshade::addon_event::bind_pipeline>(&OnBindPipeline);
     reshade::register_event<reshade::addon_event::dispatch_rays>(&OnDispatchRays);
@@ -780,6 +970,7 @@ void Install() {
 
 void Uninstall() {
     reshade::unregister_overlay(DPRT_PRODUCT, &DrawOverlay);
+    RemoveStateObjectHook();  // the vtable would otherwise point into the unloaded add-on
     if (g_log) {
         Log("unloading");
         fclose(g_log);

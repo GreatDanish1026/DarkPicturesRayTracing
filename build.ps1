@@ -48,6 +48,16 @@ cmd /c $toolCmd
 if ($LASTEXITCODE) { throw "dxilasm build failed" }
 Write-Host "Built $root\bin\dxilasm.exe"
 
+# tools\d3d12probe.exe: prints D3D12Core's CreateStateObject prologue for the detour.
+$probeCmd = @(
+    "call `"$vcvars`" >nul",
+    ("cl /nologo /std:c++17 /O2 /EHsc /MT /W3 /D_CRT_SECURE_NO_WARNINGS /DUNICODE /D_UNICODE " +
+     "/Fo`"$obj\\`" `"$root\tools\d3d12probe.cpp`" /link /OUT:`"$root\bin\d3d12probe.exe`"")
+) -join " && "
+cmd /c $probeCmd
+if ($LASTEXITCODE) { throw "d3d12probe build failed" }
+Write-Host "Built $root\bin\d3d12probe.exe"
+
 if ($Install) {
     $exe = $exes | Where-Object { Test-Path "$GameBin\$_" } | Select-Object -First 1
     if (-not $exe) { throw "None of $($exes -join ', ') found in $GameBin (pass -GameBin)" }

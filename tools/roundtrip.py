@@ -7,9 +7,12 @@ is byte-identical; size changes elsewhere are reported.
 
     python -I tools/roundtrip.py <dxil folder> <work folder> <hash> [<hash> ...]
     python -I tools/roundtrip.py <dxil folder> <work folder> --export OcclusionRGS
+    ... --stage <folder>    also copy every passing rebuild there as <hash>.dxil
+                            (the add-on's DarkPicturesRT_shaders folder)
 """
 import glob
 import os
+import shutil
 import struct
 import subprocess
 import sys
@@ -80,6 +83,14 @@ def roundtrip(folder, work, h):
 def main():
     if len(sys.argv) < 4:
         raise SystemExit(__doc__)
+    args = sys.argv[1:]
+    stage = None
+    if "--stage" in args:
+        i = args.index("--stage")
+        stage = args[i + 1]
+        del args[i:i + 2]
+        os.makedirs(stage, exist_ok=True)
+    sys.argv[1:] = args
     folder, work = sys.argv[1], sys.argv[2]
     os.makedirs(work, exist_ok=True)
     if sys.argv[3] == "--export":
@@ -96,7 +107,9 @@ def main():
         ok, notes = roundtrip(folder, work, h)
         passed += ok
         print(f"{'PASS' if ok else 'FAIL'} {h} {notes}")
-    print(f"{passed} of {len(hashes)} passed")
+        if ok and stage:
+            shutil.copyfile(os.path.join(work, "rt_" + h + ".dxil"), os.path.join(stage, h + ".dxil"))
+    print(f"{passed} of {len(hashes)} passed" + (f", staged to {stage}" if stage else ""))
 
 
 if __name__ == "__main__":
