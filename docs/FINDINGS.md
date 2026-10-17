@@ -335,3 +335,23 @@ Leave constants, `FMin` and `5.0 - x` TMax alone. Steps:
   mesh, as attached hats often are, it may not fit. 0.2.7 adds a "Skin cache budget
   1024 MB" toggle (float cvar). Overrides are now float-aware: the check, the release
   value and the overlay read float cvars as floats. _Pending in-game test._
+- Skin cache test (13:41–13:42): `r.SkinCache.SceneMemoryLimitInMB` 1024 reached the
+  renderer, but **still no brim shadow** (13:42:05 shot, different camera). Ruled out: TMax
+  trimming, material (`EnableMaterials 0`), instance mask (13), skin cache budget. Left:
+  the hat is flagged out of the ray tracing scene in the game's content (for example
+  per-primitive "Visible in Ray Tracing" off, or shadow casting off on the visible mesh
+  with its shadow-map shadow from a hidden proxy, which ray tracing skips). No cvar
+  reaches that. Possible routes: inspect the hat's cooked asset in the paks (they're
+  unencrypted) and override its flags with a mod pak, or patch primitive flags in memory.
+  Both are per-asset, and it isn't known how many props are set up this way.
+
+### Where RT shadows stand
+- Working: the cvar writer; shader replacement (CreateStateObject slot 62 hook, all 192
+  `OcclusionRGS` permutations); the TMax bias, which fixes the light fixture blocking spot
+  lights (25 cm is enough).
+- Not working: props like the mannequin's hat cast no RT shadow, so in close-ups spot-lit
+  RT shadows lose shadows that shadow maps draw. That makes them worse than shadow maps
+  for the game's key cinematic lighting.
+- A safe setting today: RT shadows with spot lights on shadow maps (`Lights.Spot 0`).
+  In the test shot that matched RT off exactly, since all visible RT shadow there comes
+  from spot lights.
