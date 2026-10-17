@@ -7,7 +7,7 @@ compiled in. The game's menu only offers ray-traced reflections. This add-on
 exposes the rest through the engine's console variables, live, from a ReShade
 overlay tab.
 
-**Status: 0.3.0.** Tested in The Devil in Me. See [docs/FINDINGS.md](docs/FINDINGS.md)
+**Status: 0.4.0.** Tested in The Devil in Me. See [docs/FINDINGS.md](docs/FINDINGS.md)
 for how it works and what was found along the way.
 
 ## Install
@@ -18,7 +18,7 @@ or run `.\build.ps1 -Install`.
 ## Use
 Open ReShade (Home), go to the **DarkPicturesRT** tab.
 
-- **Presets** change reflections and AO; shadows stay as you set them.
+- **Presets** change reflections and AO; shadows and experiments stay as you set them.
   - *Game default*: everything back to the game's values.
   - *Sharper reflections*: the game's reflection algorithm at 50% resolution (the game uses 25%).
   - *High*: the game's algorithm at full resolution, history weight 0.9 (game 0.95) to cut smearing.
@@ -33,6 +33,9 @@ Open ReShade (Home), go to the **DarkPicturesRT** tab.
   spot lights on shadow maps (recommended): the game's key lights are spot lights,
   and with RT shadows some props, such as hats, lose their shadows from them (see
   FINDINGS).
+- **Experimental**: effects the game was cooked with but never turns on: ray traced
+  translucency (glass refraction), global illumination (brute force or final gather)
+  and sky light, with their quality settings. Untested; presets leave them alone.
 - **Diagnostics**: test switches and logging from the investigation.
 
 Overrides are saved in `ReShade.ini`, section `[DarkPicturesRT]`, and applied at

@@ -501,6 +501,30 @@ void DefineSettings() {
          "their shadows from them.",
          Kind::Toggle, 0},
 
+        // Experimental: effects the game was cooked with but never turns on. Untested here;
+        // presets leave them alone.
+        {"Experimental", L"r.RayTracing.Translucency", "Ray traced translucency",
+         "Refraction and reflections on glass. Replaces raster translucency entirely, so particles and fog "
+         "cards may change.",
+         Kind::Choice, 0, 0, {{-1, "Post-process volume"}, {0, "Off"}, {1, "On"}}},
+        {"Experimental", L"r.RayTracing.Translucency.Refraction", "Translucency: refraction", nullptr, Kind::Choice, 0, 0,
+         {{0, "Off"}, {1, "On"}}},
+        {"Experimental", L"r.RayTracing.Translucency.MaxRoughness", "Translucency: max roughness", nullptr, Kind::Float,
+         0, 1},
+        {"Experimental", L"r.RayTracing.GlobalIllumination", "Ray traced global illumination",
+         "Bounce light. Expensive; final gather is the cheaper method. The game's lighting is largely baked, "
+         "so it may double up.",
+         Kind::Choice, 0, 0, {{-1, "Post-process volume"}, {0, "Off"}, {1, "Brute force"}, {2, "Final gather"}}},
+        {"Experimental", L"r.RayTracing.GlobalIllumination.SamplesPerPixel", "GI: samples per pixel", nullptr,
+         Kind::Int, 1, 8},
+        {"Experimental", L"r.RayTracing.GlobalIllumination.MaxBounces", "GI: bounces", nullptr, Kind::Int, 1, 4},
+        {"Experimental", L"r.RayTracing.GlobalIllumination.ScreenPercentage", "GI: resolution (%)",
+         "UE's default is 50.", Kind::Float, 25, 100},
+        {"Experimental", L"r.RayTracing.SkyLight", "Ray traced sky light", "Occlusion of sky lighting.", Kind::Toggle,
+         1},
+        {"Experimental", L"r.RayTracing.SkyLight.SamplesPerPixel", "Sky light: samples per pixel", nullptr, Kind::Int, 1,
+         8},
+
         // Diagnostics: session-only test switches from the shadow investigation.
         {"Diagnostics", L"r.RayTracing.Shadows.Lights.Point", "Point lights on shadow maps", nullptr, Kind::Toggle, 0, 1,
          {}, false},
@@ -679,7 +703,8 @@ void SaveSettings() {
 
 void ApplyPreset(const Preset& p) {
     for (Setting& s : g_settings) {
-        if (!s.persist || strcmp(s.group, "Shadows") == 0) continue;  // presets leave shadows alone
+        if (!s.persist || strcmp(s.group, "Shadows") == 0 || strcmp(s.group, "Experimental") == 0)
+            continue;  // presets leave shadows and experiments alone
         s.overridden = false;
         for (auto& [cvar, v] : p.values)
             if (wcscmp(cvar, s.cvar) == 0) {
@@ -1267,11 +1292,12 @@ void DrawOverlay(effect_runtime*) {
         if (ImGui::Button(kPresets[i].name)) ApplyPreset(kPresets[i]);
         ImGui::SetItemTooltip("%s", kPresets[i].help);
     }
-    ImGui::TextDisabled("Presets change reflections and AO; shadows stay as set below.");
+    ImGui::TextDisabled("Presets change reflections and AO; shadows and experiments stay as set below.");
 
     DrawGroup("Reflections", true);
     DrawGroup("Ambient occlusion", true);
     DrawGroup("Shadows", true);
+    DrawGroup("Experimental", false);
     DrawDiagnostics();
     ImGui::Separator();
     ImGui::TextDisabled("Overrides are saved in ReShade.ini [" DPRT_PRODUCT "] and applied at start.");

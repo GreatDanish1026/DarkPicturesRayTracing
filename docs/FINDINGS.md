@@ -436,3 +436,12 @@ Leave constants, `FMin` and `5.0 - x` TMax alone. Steps:
 - 0.3.3: **RT shadows with spot lights on shadow maps "looks good"** (user test, The Devil in
   Me), so the setting leaves "experimental": the overlay section is now "Shadows", open by
   default. Turning RT shadows on still ticks "Spot lights on shadow maps" with it.
+
+## 0.4.0: experimental effects (2026-10-17)
+Census values: `r.RayTracing.Translucency` 0 (int data; -1 volume, 0 off, 1 on),
+`r.RayTracing.GlobalIllumination` 0 (int data; 1 brute force, 2 final gather; `.MaxBounces` -1,
+`.ScreenPercentage` float Ref, UE default 50, `.MaxLightCount` 256), `r.RayTracing.SkyLight` 0
+(int Ref, priority 0x03 from the ini; `.ScreenPercentage` 100). The game's ray tracing pipelines
+already include `GlobalIlluminationRGS` (2) and `RayTracingCreateGatherPointsTraceRGS` (4), so the
+GI shaders exist. 0.4.0 adds these, with refraction, max roughness, samples, bounces and resolution,
+as an "Experimental" section that presets don't touch. _Pending in-game test of each._
