@@ -1,0 +1,9 @@
+# Build output (rebuild with build.ps1)
+bin/
+*.exe
+*.dll
+*.addon64
+
+# Logs and dumps the add-on writes next to the game
+DarkPicturesRT*.log
+DarkPicturesRT_text_*.bin
