@@ -7,3 +7,4 @@ bin/
 # Logs and dumps the add-on writes next to the game
 DarkPicturesRT*.log
 DarkPicturesRT_text_*.bin
+DarkPicturesRT_dxil/

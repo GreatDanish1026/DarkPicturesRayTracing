@@ -12,6 +12,10 @@
 //                          is SteamStub-encrypted, so vtable entries can only be
 //                          disassembled from memory
 //
+//   DarkPicturesRT_dxil\<hash>.dxil, index.txt
+//                          every ray tracing DXIL library the game creates, once, with
+//                          its export names (see "ray tracing pipelines")
+//
 // Two kinds of cvar:
 //   TAutoConsoleVariable<int/float>  AsVariableInt/Float return TConsoleVariableData
 //                                    (game- and render-thread copies at +0x48)
@@ -26,6 +30,7 @@
 #include <imgui.h>
 #include <reshade.hpp>
 
+#include <algorithm>
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
@@ -40,7 +45,7 @@
 
 extern "C" __declspec(dllexport) const char* NAME = DPRT_PRODUCT;
 extern "C" __declspec(dllexport) const char* DESCRIPTION =
-    "Ray tracing settings for " DPRT_GAMES " (DirectX 12). Test build: logs the ray tracing cvars; RT shadows test toggles.";
+    "Ray tracing settings for " DPRT_GAMES " (DirectX 12). Test build: ray tracing cvar and pipeline probe, RT shadows test toggles.";
 
 namespace {
 
@@ -478,6 +483,236 @@ void CheckOverrides() {
     }
 }
 
+// ---------------------------------------------------------------- ray tracing pipelines
+
+// Logs every D3D12 ray tracing pipeline (state object) the game creates, and writes each
+// DXIL library once to DarkPicturesRT_dxil\<hash>.dxil, with the export names from its
+// RDAT part in index.txt, so the library holding OcclusionRGS (RT shadows) can be found.
+// "Log ray dispatches" records, for one frame, which pipelines dispatch rays and how big.
+// UE creates a pipeline when an effect is first used, so turning RT shadows on adds the
+// shadow pipeline to the log right then.
+
+std::mutex g_rtMutex;  // pipeline events come from the game's pipeline compile threads
+std::set<uint64_t> g_dumped;  // library hashes already written
+uint32_t g_rtPipelines = 0;
+std::map<uint64_t, std::string> g_pipelineExports;  // pipeline handle -> its export names, for the dispatch log
+std::map<command_list*, uint64_t> g_boundRt;        // ray tracing pipeline bound on each command list
+struct DispatchStat {
+    uint32_t count = 0, width = 0, height = 0;
+};
+std::map<uint64_t, DispatchStat> g_dispatches;  // pipeline -> dispatches in the capture frame
+enum CaptureState { kCaptureOff, kCaptureArmed, kCaptureRecording };
+volatile long g_capture = kCaptureOff;
+
+uint64_t Fnv1a(const void* data, size_t size) {
+    uint64_t h = 0xcbf29ce484222325ull;
+    for (size_t i = 0; i < size; ++i) h = (h ^ static_cast<const uint8_t*>(data)[i]) * 0x100000001b3ull;
+    return h;
+}
+
+// Printable strings in the DXIL container's RDAT part: function and export names
+// (plain, such as "OcclusionRGS", and mangled, such as "?OcclusionRGS@@YAXXZ").
+std::vector<std::string> RdatNames(const void* code, size_t size) {
+    std::vector<std::string> names;
+    auto b = static_cast<const uint8_t*>(code);
+    if (!b || size < 32 || memcmp(b, "DXBC", 4) != 0) return names;
+    uint32_t parts;
+    memcpy(&parts, b + 28, 4);
+    for (uint32_t i = 0; i < parts && 32 + 4 * (i + 1) <= size; ++i) {
+        uint32_t off;
+        memcpy(&off, b + 32 + 4 * i, 4);
+        if (off + 8 > size || memcmp(b + off, "RDAT", 4) != 0) continue;
+        uint32_t partSize;
+        memcpy(&partSize, b + off + 4, 4);
+        const uint8_t* p = b + off + 8;
+        const uint8_t* end = p + (off + 8 + partSize <= size ? partSize : size - off - 8);
+        std::string cur;
+        for (; p < end; ++p) {
+            if (*p >= 0x20 && *p < 0x7f) {
+                cur.push_back(static_cast<char>(*p));
+                continue;
+            }
+            if (*p == 0 && cur.size() >= 4 && std::find(names.begin(), names.end(), cur) == names.end())
+                names.push_back(cur);
+            cur.clear();
+        }
+    }
+    return names;
+}
+
+// The plain (unmangled) names, joined, for the log.
+std::string PlainNames(const std::vector<std::string>& names, size_t max = 8) {
+    std::string out;
+    size_t n = 0;
+    for (const std::string& s : names) {
+        if (s.find_first_of("?@") != std::string::npos) continue;
+        if (n++ == max) {
+            out += " ...";
+            break;
+        }
+        if (!out.empty()) out += ", ";
+        out += s;
+    }
+    return out;
+}
+
+void DumpLibrary(uint64_t hash, const void* code, size_t size, const std::vector<std::string>& names) {
+    if (!g_dumped.insert(hash).second) return;
+    std::wstring dir = g_dir + L"" DPRT_PRODUCT "_dxil\\";
+    CreateDirectoryW(dir.c_str(), nullptr);
+    wchar_t file[32];
+    swprintf(file, 32, L"%016llx.dxil", static_cast<unsigned long long>(hash));
+    if (GetFileAttributesW((dir + file).c_str()) == INVALID_FILE_ATTRIBUTES) {
+        if (FILE* f = _wfopen((dir + file).c_str(), L"wb")) {
+            fwrite(code, 1, size, f);
+            fclose(f);
+        }
+        if (FILE* f = _wfopen((dir + L"index.txt").c_str(), L"a")) {
+            fprintf(f, "%016llx %zu", static_cast<unsigned long long>(hash), size);
+            for (const std::string& s : names) fprintf(f, " %s", s.c_str());
+            fprintf(f, "\n");
+            fclose(f);
+        }
+    }
+}
+
+const char* SubobjectName(pipeline_subobject_type t) {
+    switch (t) {
+        case pipeline_subobject_type::raygen_shader: return "raygen";
+        case pipeline_subobject_type::any_hit_shader: return "any hit";
+        case pipeline_subobject_type::closest_hit_shader: return "closest hit";
+        case pipeline_subobject_type::miss_shader: return "miss";
+        case pipeline_subobject_type::intersection_shader: return "intersection";
+        case pipeline_subobject_type::callable_shader: return "callable";
+        case pipeline_subobject_type::libraries: return "libraries";
+        case pipeline_subobject_type::shader_groups: return "shader groups";
+        case pipeline_subobject_type::max_payload_size: return "max payload size";
+        case pipeline_subobject_type::max_attribute_size: return "max attribute size";
+        case pipeline_subobject_type::max_recursion_depth: return "max recursion depth";
+        case pipeline_subobject_type::flags: return "flags";
+        default: return nullptr;
+    }
+}
+
+bool IsShaderSubobject(pipeline_subobject_type t) {
+    return t >= pipeline_subobject_type::raygen_shader && t <= pipeline_subobject_type::callable_shader;
+}
+
+void OnInitPipeline(device*, pipeline_layout layout, uint32_t count, const pipeline_subobject* subobjects,
+                    pipeline pipe) {
+    bool rt = false;
+    for (uint32_t i = 0; i < count; ++i)
+        rt |= IsShaderSubobject(subobjects[i].type) || subobjects[i].type == pipeline_subobject_type::libraries ||
+              subobjects[i].type == pipeline_subobject_type::shader_groups;
+    if (!rt) return;
+
+    std::lock_guard lock(g_rtMutex);
+    ++g_rtPipelines;
+    Log("rt pipeline %016llx (layout %016llx), %u subobjects:", static_cast<unsigned long long>(pipe.handle),
+        static_cast<unsigned long long>(layout.handle), count);
+    std::vector<std::string> pipelineNames;
+    for (uint32_t i = 0; i < count; ++i) {
+        const pipeline_subobject& s = subobjects[i];
+        const char* name = SubobjectName(s.type);
+        if (IsShaderSubobject(s.type)) {
+            auto shaders = static_cast<const shader_desc*>(s.data);
+            for (uint32_t j = 0; j < s.count; ++j) {
+                const shader_desc& d = shaders[j];
+                uint64_t hash = d.code ? Fnv1a(d.code, d.code_size) : 0;
+                std::vector<std::string> names = RdatNames(d.code, d.code_size);
+                if (d.code) DumpLibrary(hash, d.code, d.code_size, names);
+                std::string plain = PlainNames(names);
+                if (d.entry_point) pipelineNames.push_back(d.entry_point);
+                for (const std::string& n : names)
+                    if (n.find_first_of("?@") == std::string::npos) pipelineNames.push_back(n);
+                Log("  %s[%u]: %zu bytes, %016llx, entry %s, names: %s", name, j, d.code_size,
+                    static_cast<unsigned long long>(hash), d.entry_point ? d.entry_point : "-", plain.c_str());
+            }
+        } else if (s.type == pipeline_subobject_type::libraries) {
+            auto libs = static_cast<const pipeline*>(s.data);
+            for (uint32_t j = 0; j < s.count; ++j) {
+                auto it = g_pipelineExports.find(libs[j].handle);
+                Log("  library[%u]: pipeline %016llx (%s)", j, static_cast<unsigned long long>(libs[j].handle),
+                    it != g_pipelineExports.end() ? it->second.c_str() : "not seen");
+                if (it != g_pipelineExports.end()) pipelineNames.push_back(it->second);
+            }
+        } else if (s.type == pipeline_subobject_type::shader_groups) {
+            auto groups = static_cast<const shader_group*>(s.data);
+            std::string line;
+            for (uint32_t j = 0; j < s.count; ++j) {
+                char buf[48];
+                const shader_group& g = groups[j];
+                if (g.type == shader_group_type::raygen)
+                    snprintf(buf, sizeof(buf), " rg%u", g.raygen.shader_index);
+                else if (g.type == shader_group_type::miss)
+                    snprintf(buf, sizeof(buf), " ms%u", g.miss.shader_index);
+                else if (g.type == shader_group_type::callable)
+                    snprintf(buf, sizeof(buf), " cl%u", g.callable.shader_index);
+                else
+                    snprintf(buf, sizeof(buf), " hit(%d,%d,%d)", static_cast<int>(g.hit_group.closest_hit_shader_index),
+                             static_cast<int>(g.hit_group.any_hit_shader_index),
+                             static_cast<int>(g.hit_group.intersection_shader_index));
+                line += buf;
+                if (line.size() > 400) {
+                    line += " ...";
+                    break;
+                }
+            }
+            Log("  shader groups (%u):%s", s.count, line.c_str());
+        } else if (name && s.data && s.type != pipeline_subobject_type::flags) {
+            Log("  %s: %u", name, *static_cast<const uint32_t*>(s.data));
+        } else {
+            Log("  subobject type %u, count %u", static_cast<uint32_t>(s.type), s.count);
+        }
+    }
+    std::string joined;
+    for (const std::string& n : pipelineNames) {
+        if (joined.find(n) != std::string::npos) continue;
+        if (joined.size() > 200) {
+            joined += ", ...";
+            break;
+        }
+        joined += joined.empty() ? n : ", " + n;
+    }
+    g_pipelineExports[pipe.handle] = joined;
+}
+
+void OnBindPipeline(command_list* cmd, pipeline_stage stages, pipeline pipe) {
+    if ((static_cast<uint32_t>(stages) & static_cast<uint32_t>(pipeline_stage::ray_tracing_shader)) == 0) return;
+    std::lock_guard lock(g_rtMutex);
+    g_boundRt[cmd] = pipe.handle;
+}
+
+bool OnDispatchRays(command_list* cmd, resource, uint64_t, uint64_t, resource, uint64_t, uint64_t, uint64_t, resource,
+                    uint64_t, uint64_t, uint64_t, resource, uint64_t, uint64_t, uint64_t, uint32_t width, uint32_t height,
+                    uint32_t) {
+    if (g_capture != kCaptureRecording) return false;
+    std::lock_guard lock(g_rtMutex);
+    DispatchStat& s = g_dispatches[g_boundRt[cmd]];
+    ++s.count;
+    s.width = width;
+    s.height = height;
+    return false;
+}
+
+// Called at present: arms the capture for the next frame, then logs it.
+void StepCapture() {
+    if (g_capture == kCaptureArmed) {
+        std::lock_guard lock(g_rtMutex);
+        g_dispatches.clear();
+        g_capture = kCaptureRecording;
+    } else if (g_capture == kCaptureRecording) {
+        g_capture = kCaptureOff;
+        std::lock_guard lock(g_rtMutex);
+        Log("ray dispatches in one frame: %zu pipelines", g_dispatches.size());
+        for (auto& [handle, s] : g_dispatches) {
+            auto it = g_pipelineExports.find(handle);
+            Log("  pipeline %016llx: %u dispatches, last %ux%u (%s)", static_cast<unsigned long long>(handle), s.count,
+                s.width, s.height, it != g_pipelineExports.end() ? it->second.c_str() : "not seen");
+        }
+    }
+}
+
 // ---------------------------------------------------------------- events
 
 constexpr uint64_t kCensusFrame = 600;  // ~10 s in: plugins have registered their cvars by then
@@ -502,11 +737,12 @@ void OnPresent(command_queue*, swapchain*, const rect*, const rect*, uint32_t, c
     }
     ApplyOverrides();
     if (g_frames % 60 == 0) CheckOverrides();
+    StepCapture();
 }
 
 void DrawOverlay(effect_runtime*) {
     std::lock_guard lock(g_mutex);
-    ImGui::TextUnformatted(DPRT_PRODUCT " " DPRT_VERSION " - phase 1 test");
+    ImGui::TextUnformatted(DPRT_PRODUCT " " DPRT_VERSION " - test build");
     ImGui::Text("Status: %s", g_frames < kCensusFrame ? "first census after 10 s" : g_status.c_str());
 
     ImGui::Separator();
@@ -516,6 +752,13 @@ void DrawOverlay(effect_runtime*) {
         if (o.var) ImGui::Text("    now: %s", Live(o.var).c_str());
     }
     if (!g_manager) ImGui::EndDisabled();
+
+    ImGui::Separator();
+    {
+        std::lock_guard rtLock(g_rtMutex);
+        ImGui::Text("Ray tracing pipelines: %u, DXIL libraries dumped: %zu", g_rtPipelines, g_dumped.size());
+    }
+    if (ImGui::Button("Log ray dispatches (one frame)") && g_capture == kCaptureOff) g_capture = kCaptureArmed;
 
     ImGui::Separator();
     if (ImGui::Button("Snapshot cvars (logs what changed)")) g_snapshotRequested = true;
@@ -529,6 +772,9 @@ void Install() {
     LogGameInfo();
     reshade::register_event<reshade::addon_event::init_device>(&OnInitDevice);
     reshade::register_event<reshade::addon_event::present>(&OnPresent);
+    reshade::register_event<reshade::addon_event::init_pipeline>(&OnInitPipeline);
+    reshade::register_event<reshade::addon_event::bind_pipeline>(&OnBindPipeline);
+    reshade::register_event<reshade::addon_event::dispatch_rays>(&OnDispatchRays);
     reshade::register_overlay(DPRT_PRODUCT, &DrawOverlay);
 }
 

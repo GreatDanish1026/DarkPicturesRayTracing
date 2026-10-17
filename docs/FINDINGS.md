@@ -173,3 +173,40 @@ use the same in-game replacement as AWTweaks:
    validate), and swap it in at `create_pipeline`.
 3. Expose the bias in the overlay, and test this scene with spot lights on RT.
 Meanwhile, RT shadows with spot lights on shadow maps works as it is.
+
+## Ray tracing pipelines (probe 0.2.0, 2026-10-17)
+- UE 4.26 builds **one collection per shader**: a state object holding one DXIL library
+  (one export), payload 24, attributes 8, recursion 1. The probe saw 220 of them. The
+  final pipeline that links them and dispatches **never reaches add-ons**: the
+  dispatched handles aren't any pipeline seen in `init_pipeline`. To replace a shader,
+  swap its code inside its collection at `create_pipeline`; the linked pipeline then
+  picks it up.
+- Raygen exports seen: `OcclusionRGS` (96 collections, **80 distinct libraries**),
+  `AmbientOcclusionRGS` 4, `RayTracingDeferredReflectionsRGS` 3, `RayTracingReflectionsRGS` 1,
+  `GlobalIlluminationRGS` 2, `RayTracingCreateGatherPointsTraceRGS` 4. The `OcclusionRGS`
+  collections are created the moment RT shadows are first turned on.
+- One frame of dispatches, RT shadows off: one pipeline, 1 dispatch at 2564x1068 (render
+  resolution with DLSS Quality). With shadows on, a second pipeline adds 3 dispatches at
+  2564x1068, which looks like one dispatch per shadowed light.
+- `OcclusionRGS` (smallest permutation, baf478b2ce1f3f1d): two `TraceRay` calls, TMin 0,
+  instance mask 12. TMax is `sqrt(dot(d, d))`, where d is the light sample point (light
+  position from cbuffer register 7 plus a jittered offset across the light's shape)
+  minus the surface point. **Nothing biases the light end**, so anything wrapped around
+  the light (a fixture) blocks the ray. That matches the 0.1.x tests.
+- Across the 80 permutations, 2, 4, 5 or 7 `TraceRay` calls take TMax from: `Sqrt`
+  (distance to the light), `phi` of such values (branches), constants or `FMin` (opcode
+  36; directional / capped distance), and `5.0 - x` (short extra rays, probably hair or
+  transmission).
+- The Windows SDK's `dxcompiler.dll` has `IDxcAssembler::AssembleToContainer` ("Assemble
+  DXIL in LL or LLVM bitcode to DXIL container"), and `dxil.dll` validates and signs.
+  So the plan: disassemble (`dxc -dumpbin`), edit the IR, reassemble, sign.
+
+### Patch rule (planned)
+For each `TraceRay` whose TMax comes from a `Sqrt` (directly or through a `phi`), replace
+TMax with `max(TMin + epsilon, TMax - Bias)` (FMax, opcode 35), with Bias in cm (UE units).
+Leave constants, `FMin` and `5.0 - x` TMax alone. Steps:
+1. A round-trip test on all 80 unmodified libraries: dumpbin → assemble → sign →
+   dumpbin, with matching IR. If they don't round-trip, the approach is no good.
+2. Patched sets at a few biases (for example 10, 25, 50 cm), and the add-on swapping them
+   in at `create_pipeline` by library hash. Changing the bias needs a restart, because the
+   collections are created once.

@@ -6,9 +6,11 @@ The Dark Pictures Anthology (DirectX 12). Every game in the series ships with
 global illumination, sky light and translucency are compiled in. The game's
 menu only offers ray-traced reflections.
 
-**Status: phase 1 test build.** The add-on logs the game's ray tracing console
-variables and has one test toggle in its ReShade tab: ray-traced shadows
-(`r.RayTracing.Shadows`). See [docs/FINDINGS.md](docs/FINDINGS.md).
+**Status: test build (0.2.0).** The add-on logs the game's ray tracing console
+variables and ray tracing pipelines, and dumps the pipelines' DXIL libraries
+(`tools/dxil.py` finds and disassembles them). Its ReShade tab has test toggles
+for ray-traced shadows (`r.RayTracing.Shadows`) and for finding what blocks them.
+See [docs/FINDINGS.md](docs/FINDINGS.md).
 
 ## Install
 Needs ReShade 6.8+ *with full add-on support*. Start the game with `-dx12`.
