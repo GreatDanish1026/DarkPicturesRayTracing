@@ -501,3 +501,7 @@ investigation tools behind "Show diagnostics"; both choices are saved (`ShowAdva
 - So RT translucency breaks atmospheric translucency in three of the four games. The Devil in Me
   was tested in a single scene (glass, little atmosphere), so it may break there too in foggy
   or dusty scenes.
+- 0.5.3: **RT translucency is out of the presets in every game**, and presets no longer touch it
+  (they only manage reflections and AO). It's a manual switch with a warning ("glass; can break
+  fog"). The per-game preset rule table went with it; relative preset values stay. Little Hope's
+  saved translucency override was reset to "game"; The Devil in Me's was left on (the user's choice).

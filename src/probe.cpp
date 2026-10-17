@@ -504,12 +504,13 @@ void DefineSettings() {
          "their shadows from them.",
          Kind::Toggle, 0},
 
-        // Translucency: tested; it fixes glass that raster translucency blows out to white
-        // (the pharmacy display cases). High and Ultra turn it on.
+        // Translucency: a manual switch, not in presets. It fixes glass that raster translucency
+        // blows out (The Devil in Me's pharmacy) but replaces all translucency, and breaks the
+        // haze, fog and dust cards in House of Ashes, Little Hope and Man of Medan (tested).
         {"Translucency", L"r.RayTracing.Translucency", "Ray traced translucency",
-         "Proper reflections and refraction on glass; fixes display cases that render blown out (The Devil in "
-         "Me). Replaces all raster translucency: in House of Ashes and Little Hope it breaks the haze, fog and "
-         "dust cards.",
+         "Proper reflections and refraction on glass (fixes blown-out display cases in The Devil in Me). Warning: "
+         "it replaces all translucency and breaks haze, fog and dust effects (tested in House of Ashes, Little "
+         "Hope and Man of Medan; likely in foggy scenes of The Devil in Me too).",
          Kind::Choice, 0, 0, {{-1, "Post-process volume"}, {0, "Off"}, {1, "On"}}},
         {"Translucency", L"r.RayTracing.Translucency.Refraction", "Refraction", nullptr, Kind::Choice, 0, 0,
          {{0, "Off"}, {1, "On"}}},
@@ -578,17 +579,12 @@ const Preset kPresets[] = {
      {{L"r.RayTracing.Reflections.ScreenPercentage", -2}}},
     // At full resolution each output pixel gets 16x the game's rays, so the resolve needs
     // less history: the game's 0.95 history weight smears in motion there (tested).
-    {"High",
-     "Reflections at full resolution with less history (0.9) to cut smearing; ray traced translucency "
-     "(The Devil in Me only).",
+    {"High", "Reflections at full resolution with less history (0.9) to cut smearing.",
      {{L"r.RayTracing.Reflections.ScreenPercentage", 100},
-      {L"r.RayTracing.Translucency", 1},
       {L"r.RayTracing.Reflections.ExperimentalDeferred.SpatialResolve.TemporalWeight", 0.9}}},
     {"Ultra",
-     "Reflections at full resolution with 16 resolve samples (the game uses 8) and history 0.85; ray traced "
-     "translucency (The Devil in Me only); AO at 2 samples.",
+     "Reflections at full resolution with 16 resolve samples (the game uses 8) and history 0.85; AO at 2 samples.",
      {{L"r.RayTracing.Reflections.ScreenPercentage", 100},
-      {L"r.RayTracing.Translucency", 1},
       {L"r.RayTracing.Reflections.ExperimentalDeferred.SpatialResolve.NumSamples", 16},
       {L"r.RayTracing.Reflections.ExperimentalDeferred.SpatialResolve.TemporalWeight", 0.85},
       {L"r.RayTracing.AmbientOcclusion.SamplesPerPixel", 2}}},
@@ -730,21 +726,11 @@ void SaveSettings() {
 }
 
 float GameValue(Setting& s);  // overlay helpers, below
+bool IsPresetGroup(const Setting& s);
 
-// Per-game preset rules: a cvar presets only set in the listed game, where it was tested.
-// RT translucency fixes glass in The Devil in Me but breaks the haze, fog and dust cards of
-// House of Ashes and Little Hope (raster-only depth fade), so presets leave it off elsewhere.
-struct PresetRule {
-    const wchar_t* cvar;
-    const char* onlyIn;
-};
-const PresetRule kPresetRules[] = {{L"r.RayTracing.Translucency", "The Devil in Me"}};
-
-// What preset p sets setting s to, if anything (after the per-game rules; relative values
-// resolved against the game's own value).
+// What preset p sets setting s to, if anything (relative values resolved against the
+// game's own value).
 bool PresetTarget(const Preset& p, Setting& s, float& out) {
-    for (const PresetRule& r : kPresetRules)
-        if (wcscmp(r.cvar, s.cvar) == 0 && strcmp(r.onlyIn, g_gameName) != 0) return false;
     for (auto& [cvar, v] : p.values) {
         if (wcscmp(cvar, s.cvar) != 0) continue;
         out = v >= 0 ? static_cast<float>(v) : (std::min)(s.max, GameValue(s) * static_cast<float>(-v));
@@ -755,9 +741,7 @@ bool PresetTarget(const Preset& p, Setting& s, float& out) {
 
 void ApplyPreset(const Preset& p) {
     for (Setting& s : g_settings) {
-        if (!s.persist || strcmp(s.group, "Shadows") == 0 || strcmp(s.group, "Global illumination") == 0 ||
-            strcmp(s.group, "Experimental") == 0)
-            continue;  // presets leave shadows, GI and experiments alone
+        if (!IsPresetGroup(s)) continue;  // presets leave translucency, shadows, GI and experiments alone
         float v;
         s.overridden = PresetTarget(p, s, v);
         if (s.overridden) s.value = v;
@@ -1373,8 +1357,7 @@ void SetOverride(const wchar_t* cvar, bool on, float value = 0) {
 }
 
 bool IsPresetGroup(const Setting& s) {
-    return s.persist && strcmp(s.group, "Shadows") != 0 && strcmp(s.group, "Global illumination") != 0 &&
-           strcmp(s.group, "Experimental") != 0;
+    return s.persist && (strcmp(s.group, "Reflections") == 0 || strcmp(s.group, "Ambient occlusion") == 0);
 }
 
 // The preset the current settings match exactly, or -1 (custom).
@@ -1451,9 +1434,10 @@ void DrawSimple() {
             SetOverride(L"r.RayTracing.Shadows.Lights.Spot", shadows, 0);
         }
         bool glass = IsOn(L"r.RayTracing.Translucency", 1);
-        if (SwitchRow("Ray traced translucency", &glass, "glass",
-                      "Proper reflections and refraction on glass; fixes display cases that render blown out "
-                      "(The Devil in Me). In House of Ashes and Little Hope it breaks the haze and fog cards."))
+        if (SwitchRow("Ray traced translucency", &glass, "glass; can break fog",
+                      "Proper reflections and refraction on glass. Warning: it replaces all translucency and "
+                      "breaks haze, fog and dust effects (seen in House of Ashes, Little Hope and Man of Medan). "
+                      "Turn on only where glass looks wrong."))
             SetOverride(L"r.RayTracing.Translucency", glass, 1);
 
         ImGui::TableNextColumn();

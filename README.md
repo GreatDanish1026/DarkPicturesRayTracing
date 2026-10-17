@@ -7,7 +7,7 @@ compiled in. The game's menu only offers ray-traced reflections. This add-on
 exposes the rest through the engine's console variables, live, from a ReShade
 overlay tab.
 
-**Status: 0.5.2.** Tested in The Devil in Me, House of Ashes, Little Hope and Man of Medan. See [docs/FINDINGS.md](docs/FINDINGS.md)
+**Status: 0.5.3.** Tested in The Devil in Me, House of Ashes, Little Hope and Man of Medan. See [docs/FINDINGS.md](docs/FINDINGS.md)
 for how it works and what was found along the way.
 
 ## Install
@@ -18,20 +18,20 @@ or run `.\build.ps1 -Install`.
 ## Use
 Open ReShade (Home), go to the **DarkPicturesRT** tab. The tab opens in a simple view:
 
-- **Quality**: presets for reflections, translucency and AO. The button matching the
-  current settings is highlighted ("custom" if none does).
+- **Quality**: presets for reflections and AO. The button matching the current settings
+  is highlighted ("custom" if none does).
   - *Game default*: the game's own settings.
   - *Sharper reflections*: twice the game's reflection resolution (The Devil in Me 25% → 50%,
     House of Ashes 50% → 100%).
-  - *High*: reflections at full resolution with less history (0.9, game 0.95) to cut
-    smearing; ray traced translucency in The Devil in Me (see below).
+  - *High*: reflections at full resolution with less history (0.9, game 0.95) to cut smearing.
   - *Ultra*: High with 16 reflection resolve samples (game 8), history 0.85, and AO at 2 samples.
 - **Ray traced shadows**: on for the game's lights, with spot lights kept on shadow maps
   (the game's key lights are spot lights; under RT some props, such as hats, lose
   their shadows from them).
-- **Ray traced translucency**: proper glass; fixes display cases The Devil in Me renders
-  blown out. It replaces all translucent rendering, so in House of Ashes and Little Hope
-  it breaks the haze, fog and dust cards (Man of Medan too); presets only turn it on in The Devil in Me.
+- **Ray traced translucency** (manual, not in presets): proper glass; fixes display cases
+  The Devil in Me renders blown out. It replaces all translucent rendering, so it breaks
+  haze, fog and dust effects: seen in House of Ashes, Little Hope and Man of Medan, and
+  likely in foggy scenes of The Devil in Me. Turn it on only where glass looks wrong.
 - **Global illumination**: Off, or final gather (ray traced bounce light, with firefly
   suppression and filter width 2, which make it clean).
 - **Ray traced sky light**: for outdoor scenes (noisy indoors).
