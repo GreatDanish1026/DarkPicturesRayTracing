@@ -527,10 +527,16 @@ const Preset kPresets[] = {
     {"Game default", "Everything back to the game's own values.", {}},
     {"Sharper reflections", "The game's fast algorithm at 50% resolution (the game uses 25%).",
      {{L"r.RayTracing.Reflections.ScreenPercentage", 50}}},
-    {"High", "The game's fast algorithm at full resolution.", {{L"r.RayTracing.Reflections.ScreenPercentage", 100}}},
-    {"Ultra", "Full resolution with 16 resolve samples (the game uses 8); AO at 2 samples.",
+    // At full resolution each output pixel gets 16x the game's rays, so the resolve needs
+    // less history: the game's 0.95 history weight smears in motion there (tested).
+    {"High", "The game's fast algorithm at full resolution, with less history (0.9) to cut smearing.",
+     {{L"r.RayTracing.Reflections.ScreenPercentage", 100},
+      {L"r.RayTracing.Reflections.ExperimentalDeferred.SpatialResolve.TemporalWeight", 0.9}}},
+    {"Ultra",
+     "Full resolution with 16 resolve samples (the game uses 8) and history 0.85; AO at 2 samples.",
      {{L"r.RayTracing.Reflections.ScreenPercentage", 100},
       {L"r.RayTracing.Reflections.ExperimentalDeferred.SpatialResolve.NumSamples", 16},
+      {L"r.RayTracing.Reflections.ExperimentalDeferred.SpatialResolve.TemporalWeight", 0.85},
       {L"r.RayTracing.AmbientOcclusion.SamplesPerPixel", 2}}},
 };
 

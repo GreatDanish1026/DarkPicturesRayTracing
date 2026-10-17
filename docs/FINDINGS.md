@@ -428,3 +428,8 @@ Leave constants, `FMin` and `5.0 - x` TMax alone. Steps:
   16 resolve samples and AO at 2 samples. New settings: deferred resolve samples, radius,
   temporal quality and history weight, and the standard denoiser's reconstruction samples.
   The standard algorithm remains a setting, labelled noisy. _Pending in-game test._
+- 0.3.1 test: Ultra (100%, 16 resolve samples, the game's history weight 0.95) looked
+  "a little smeary in motion" (with the DarkPicturesDLSS add-on on, in Quality mode). At full
+  resolution each output pixel gets 16x the rays it gets at 25%, so less history is needed:
+  0.3.2 presets use `SpatialResolve.TemporalWeight` 0.9 (High) and 0.85 (Ultra). _Pending
+  in-game test._
