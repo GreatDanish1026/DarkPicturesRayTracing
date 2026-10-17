@@ -355,3 +355,41 @@ Leave constants, `FMin` and `5.0 - x` TMax alone. Steps:
 - A safe setting today: RT shadows with spot lights on shadow maps (`Lights.Spot 0`).
   In the test shot that matched RT off exactly, since all visible RT shadow there comes
   from spot lights.
+
+## The mannequin hat in the paks (tools/uasset.py, 2026-10-17)
+- The barbershop animatronic is a prop: `/Game/Props/CharacterProps/AnimatronicBarbershop/`.
+  `CharacterPropsAnimatronicBarbershop` (a Blueprint whose only components are a root,
+  an anim updater and one `SkeletalMeshComponent` "Mesh") uses the skeletal mesh
+  `Rig/CharacterPropsAnimatronicBarbershop` (1 LOD, 58 bones). There is no separate hat
+  asset: the straw hat is **material section 5 of the same skeletal mesh** as the head,
+  and it reuses Jeff's `/Game/Characters/Models/Jeff/Body/Jacket/Materials/Hat_Mat`. Other
+  hats in the game (Curator, Charlie) are separate skeletal "CharacterProps"; Marie's is
+  a static mesh.
+- Decoded render sections (UE 4.26 `FSkelMeshRenderSection`, starting at `0x1820` in
+  the `.uexp`; the layout is stock, with no per-section ray tracing visibility field):
+
+  | Section | Material | Triangles | bCastShadow | Bones | Max influences |
+  |---|---|---|---|---|---|
+  | 0 | Stand | 2724 | 1 | 2 | 2 |
+  | 1 | Head | 10039 | 1 | 1 | 1 |
+  | 2 | Body | 10529 | 1 | 51 | 7 |
+  | 3 | Shirt | 27306 | 1 | 17 | 5 |
+  | 4 | Coat | 17898 | 1 | 9 | 3 |
+  | 5 | Hat | 3376 | 1 | 1 | 1 |
+
+- `Hat_Mat` is a `MaterialInstanceConstant` of `SMG_Cloth_V12` that overrides only
+  `OpacityMaskClipValue`. The parent sets no `BlendMode`, so it is **opaque**: no any-hit
+  shader, so shadow rays stop on it. The parent contains a
+  `MaterialExpressionRayTracingQualitySwitch` (a different shading path in ray tracing;
+  the graph is stripped in the cooked build), but on an opaque material that can't let
+  shadow rays through.
+- Reference: the game's loaded material any-hit shaders come in two kinds. 9 are
+  translucent: `if (payload flags & 0x08000000) IgnoreHit()`, i.e. "ignore translucent".
+  5 are masked: `if (Material_Texture2D_1.a - 0.333 < 0) IgnoreHit()`.
+- **Verdict: no asset flag explains the missing brim shadow, so a mod pak has nothing
+  to flip.** The hat is set up like the head, whose jaw casts RT shadows (seen in game).
+  The cause is at runtime: the hat's triangles are missing from, or misplaced in, the
+  skeletal mesh's ray tracing geometry. So it's also unknown whether other props are
+  affected; that would show up in game, not in their assets. Next step, if pursued: a
+  ray tracing debug view of the scene's geometry (UE's `RayTracingDebug` show flag isn't
+  reachable through cvars in a shipping build).
