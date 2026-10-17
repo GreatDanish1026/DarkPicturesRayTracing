@@ -323,3 +323,15 @@ Leave constants, `FMin` and `5.0 - x` TMax alone. Steps:
   the brim shadow is cast by a spot light, and with spots on shadow maps the other RT
   shadowed lights change nothing visible in this shot. The mask-13 brim test still needs
   a screenshot with spots on RT.
+- Mask-13 run with spots on RT (13:37): **still no brim shadow**; it looks like the 50 cm
+  mask-12 shot (the pose differs slightly). So it isn't the instance mask: the hat isn't
+  in the ray tracing scene as an occluder at all, while the mannequin's body is (the jaw
+  still shadows the neck).
+- Next suspect: in UE 4.26, skeletal meshes enter ray tracing **only through the GPU skin
+  cache**, and a mesh that doesn't fit the per-scene budget is left out of ray tracing
+  silently (it still renders through the regular GPU skin vertex factory). Census:
+  `r.SkinCache.SceneMemoryLimitInMB` **128** (stock default), `Mode` 1, `RecomputeTangents`
+  3 (adds memory per mesh), `DefaultBehavior` 1. If the hat is a separate skeletal
+  mesh, as attached hats often are, it may not fit. 0.2.7 adds a "Skin cache budget
+  1024 MB" toggle (float cvar). Overrides are now float-aware: the check, the release
+  value and the overlay read float cvars as floats. _Pending in-game test._

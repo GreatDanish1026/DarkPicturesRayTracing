@@ -406,7 +406,7 @@ struct Override {
     bool active = false;    // forced right now
     void* var = nullptr;
     uint32_t originalFlags = 0;
-    int32_t original = 0;
+    std::wstring original;  // renderer's value before we forced it, as text
     uint32_t repairs = 0;  // times CheckOverrides put the value back
 };
 // Test toggles. The first turns ray-traced shadows on; the rest find what blocks the
@@ -427,16 +427,45 @@ Override g_overrides[] = {
     {L"r.RayTracing.Geometry.InstancedStaticMeshes", "  No instanced static meshes in RT scene (InstancedStaticMeshes 0)", L"0"},
     {L"r.RayTracing.Geometry.NiagaraSprites", "  No Niagara sprites in RT scene (Geometry.NiagaraSprites 0)", L"0"},
     {L"r.RayTracing.Geometry.NiagaraMeshes", "  No Niagara meshes in RT scene (Geometry.NiagaraMeshes 0)", L"0"},
+    // Skeletal meshes enter ray tracing only through the GPU skin cache; meshes that don't
+    // fit its per-scene budget (stock 128 MB) are left out of ray tracing silently.
+    {L"r.SkinCache.SceneMemoryLimitInMB", "  Skin cache budget 1024 MB (SkinCache.SceneMemoryLimitInMB)", L"1024"},
 };
+
+bool IsFloat(void* var) { return cvars::AsData(var, true) != nullptr; }
+
+// The value the renderer reads, as text in the cvar's own type (for Set and the log).
+std::wstring RenderText(void* var) {
+    cvars::Storage st;
+    uint32_t raw = 0;
+    wchar_t buf[32] = L"?";
+    if (cvars::GetStorage(var, st) && cvars::SafeCopy(&raw, st.render, st.size)) {
+        float f;
+        memcpy(&f, &raw, 4);
+        if (IsFloat(var))
+            swprintf(buf, 32, L"%g", f);
+        else
+            swprintf(buf, 32, L"%d", st.size == 1 ? static_cast<int32_t>(raw & 0xff) : static_cast<int32_t>(raw));
+    }
+    return buf;
+}
 
 // Main value (what Set stored) and the value the renderer reads, with the priority.
 std::string Live(void* var) {
     cvars::Storage st;
-    int32_t main = 0, render = 0;
-    if (!cvars::GetStorage(var, st) || !cvars::SafeCopy(&main, st.main, st.size) || !cvars::RenderInt(var, render))
-        return "unreadable";
-    char buf[80];
-    snprintf(buf, sizeof(buf), "main %d / renderer %d, priority 0x%02x", main, render, cvars::Flags(var) >> 24);
+    uint32_t main = 0;
+    if (!cvars::GetStorage(var, st) || !cvars::SafeCopy(&main, st.main, st.size)) return "unreadable";
+    char buf[96];
+    if (IsFloat(var)) {
+        float f;
+        memcpy(&f, &main, 4);
+        snprintf(buf, sizeof(buf), "main %g / renderer %ls, priority 0x%02x", f, RenderText(var).c_str(),
+                 cvars::Flags(var) >> 24);
+    } else {
+        snprintf(buf, sizeof(buf), "main %d / renderer %ls, priority 0x%02x",
+                 st.size == 1 ? static_cast<int32_t>(main & 0xff) : static_cast<int32_t>(main), RenderText(var).c_str(),
+                 cvars::Flags(var) >> 24);
+    }
     return buf;
 }
 
@@ -453,7 +482,7 @@ void ApplyOverrides() {
         std::string before = Live(o.var);
         if (o.want) {
             o.originalFlags = cvars::Flags(o.var);
-            cvars::RenderInt(o.var, o.original);  // what the renderer used before us
+            o.original = RenderText(o.var);  // what the renderer used before us
             bool ok = cvars::Set(o.var, o.forced, cvars::kSetByConsole) && cvars::MirrorToRenderer(o.var);
             Log("override: %ls = %ls%s: %s -> %s", o.name, o.forced, ok ? "" : " (Set or mirror failed)", before.c_str(),
                 Live(o.var).c_str());
@@ -462,8 +491,7 @@ void ApplyOverrides() {
         } else {
             // Back to the game's priority first, or Set would refuse the lower one.
             cvars::Flags(o.var) = o.originalFlags;
-            wchar_t value[16];
-            swprintf(value, 16, L"%d", o.original);
+            const wchar_t* value = o.original.c_str();
             bool ok = cvars::Set(o.var, value, o.originalFlags & 0xff000000) && cvars::MirrorToRenderer(o.var);
             Log("override: %ls released to %ls%s: %s -> %s", o.name, value, ok ? "" : " (Set or mirror failed)", before.c_str(),
                 Live(o.var).c_str());
@@ -477,8 +505,8 @@ void ApplyOverrides() {
 void CheckOverrides() {
     for (Override& o : g_overrides) {
         if (!o.active) continue;
-        int32_t render = 0;
-        if (!cvars::RenderInt(o.var, render) || render == _wtoi(o.forced)) continue;
+        std::wstring render = RenderText(o.var);
+        if (IsFloat(o.var) ? wcstof(render.c_str(), nullptr) == wcstof(o.forced, nullptr) : render == o.forced) continue;
         if (++o.repairs <= 5)
             Log("override: %ls changed behind our back: %s; setting it again%s", o.name, Live(o.var).c_str(),
                 o.repairs == 5 ? " (not logging further repairs)" : "");
