@@ -257,4 +257,15 @@ Leave constants, `FMin` and `5.0 - x` TMax alone. Steps:
   the call, then restores it. `tools\d3d12probe --hook-test` patches the slot, calls
   `CreateStateObject` through the C++ interface, and checks that the hook ran exactly once
   with an unchanged result: **PASS** on D3D12Core 6.2.26100.9549 (slot 62 → rva 0xcef90).
-  _Pending in-game run with the 96 round-tripped libraries._
+- **0.2.6 in game (2026-10-17): D3D12 accepts reassembled libraries.** With the 96
+  unmodified round-tripped `OcclusionRGS` libraries staged, turning RT shadows on swapped
+  all 96 into their collections, and **all 96 were accepted**, with 0 failed
+  `CreateStateObject` calls. The shadow pipeline then dispatched as before (3 dispatches at
+  2564x1068) on the reassembled code. No screenshots were taken, so it's not yet visually
+  confirmed that the image is unchanged.
+- What reaches slot 62: collections are type 0 (`COLLECTION`) with subobjects 5 (DXIL
+  library), 9 (shader config), 7 (subobject-to-exports association), 10/11 (DXIL
+  association / hit group), 0 (state object config), 1/2 (global / local root signature),
+  then 7. Pipelines are type 3, built from config, root signatures and 3+ existing
+  collections (6), then grown with `AddToStateObject`. ReShade's pipeline model has no
+  local root signature or association subobjects, which fits the 0.2.1 link failure.
