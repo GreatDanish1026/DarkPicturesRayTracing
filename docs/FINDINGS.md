@@ -481,3 +481,15 @@ investigation tools behind "Show diagnostics"; both choices are saved (`ShowAdva
 - 0.5.1: per-game preset rules (`kPresetRules`): presets set `r.RayTracing.Translucency` only in The
   Devil in Me. *Sharper reflections* is relative (negative preset value = multiple of the game's
   value, capped): twice the game's reflection resolution. The translucency tooltips name both games.
+
+## Little Hope (SMG024) (2026-10-17)
+- Same base as the others (UE 4.26, SteamStub, ReShade 6.8.0 on D3D12, `RTReflectionsQuality`
+  menu option). **0.5.1 worked unchanged:** singleton at exe+0x6f98f28, 221 cvars, settings applied.
+- **RT translucency breaks the forest fog** (screenshot 15:21:21): the haze between the tree lines
+  disappears, distant trees turn crisp and high-contrast, and branches pick up white speckles
+  (probably snow or frost particles losing their soft blending). Little Hope builds its fog
+  largely from translucent haze cards. DOF isn't the cause, but it may contribute: UE can
+  render some translucency after depth of field, and the RT translucency pass changes that
+  ordering. Not yet tested: translucency off in the same spot, and the game's DOF option off.
+- No add-on change was needed: the preset rule already limits translucency to The Devil in Me.
+  0.5.2 names Little Hope in the tooltips.

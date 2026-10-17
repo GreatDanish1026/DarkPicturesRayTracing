@@ -508,7 +508,8 @@ void DefineSettings() {
         // (the pharmacy display cases). High and Ultra turn it on.
         {"Translucency", L"r.RayTracing.Translucency", "Ray traced translucency",
          "Proper reflections and refraction on glass; fixes display cases that render blown out (The Devil in "
-         "Me). Replaces all raster translucency: in House of Ashes it breaks the caves' haze and dust cards.",
+         "Me). Replaces all raster translucency: in House of Ashes and Little Hope it breaks the haze, fog and "
+         "dust cards.",
          Kind::Choice, 0, 0, {{-1, "Post-process volume"}, {0, "Off"}, {1, "On"}}},
         {"Translucency", L"r.RayTracing.Translucency.Refraction", "Refraction", nullptr, Kind::Choice, 0, 0,
          {{0, "Off"}, {1, "On"}}},
@@ -731,8 +732,8 @@ void SaveSettings() {
 float GameValue(Setting& s);  // overlay helpers, below
 
 // Per-game preset rules: a cvar presets only set in the listed game, where it was tested.
-// RT translucency fixes glass in The Devil in Me but breaks House of Ashes' cave haze and
-// dust cards (raster-only depth fade), so presets leave it off elsewhere.
+// RT translucency fixes glass in The Devil in Me but breaks the haze, fog and dust cards of
+// House of Ashes and Little Hope (raster-only depth fade), so presets leave it off elsewhere.
 struct PresetRule {
     const wchar_t* cvar;
     const char* onlyIn;
@@ -1452,7 +1453,7 @@ void DrawSimple() {
         bool glass = IsOn(L"r.RayTracing.Translucency", 1);
         if (SwitchRow("Ray traced translucency", &glass, "glass",
                       "Proper reflections and refraction on glass; fixes display cases that render blown out "
-                      "(The Devil in Me). In House of Ashes it breaks the caves' haze and dust cards."))
+                      "(The Devil in Me). In House of Ashes and Little Hope it breaks the haze and fog cards."))
             SetOverride(L"r.RayTracing.Translucency", glass, 1);
 
         ImGui::TableNextColumn();
