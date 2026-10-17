@@ -288,4 +288,18 @@ Leave constants, `FMin` and `5.0 - x` TMax alone. Steps:
   directional-light permutations.
 - Staged for the fixture test: 25 cm in `DarkPicturesRT_shaders`. 10 cm and 50 cm are in
   `DarkPicturesRT_shaders_10cm` / `_50cm` next to the exe (rename to switch; restart, since
-  collections are created once). _Pending in-game run._
+  collections are created once).
+- **In game (2026-10-17), mannequin scene, RT shadows on, spot lights on RT: the bias
+  brings the key light back.** At 25 cm and 50 cm the face, shirt, waistcoat and curtain
+  are lit again (the original shader left them dark), and the two look the same. So the
+  blocker sits within 25 cm of the light, which fits the fixture.
+- New problem: the hat brim casts **no RT shadow** on the eyes (shadow maps draw one).
+  The bias isn't the cause. In the IR, the ray origin is the surface (`%168`, rebuilt from
+  depth with the view origin in cbuffer register 67, plus a normal offset), the direction
+  points to the light sample (cbuffer register 7), and TMax is their distance, so the patch
+  trims the light end only. The brim is about 10 cm from the face, at the very start of
+  the ray, and 25 and 50 cm look the same. Suspects: the straw hat's masked or translucent
+  material (with `EnableMaterials 1`, shadow rays run its any-hit shader, which may let
+  rays through; translucent materials don't cast RT shadows), or the attached hat sitting
+  at a wrong transform in the ray tracing scene. Next test: the "Masked materials as
+  opaque" toggle (`r.RayTracing.Shadows.EnableMaterials 0`).
