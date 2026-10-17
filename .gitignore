@@ -10,3 +10,4 @@ DarkPicturesRT_text_*.bin
 DarkPicturesRT_dxil/
 DarkPicturesRT_shaders/
 DarkPicturesRT_shaders_*/
+__pycache__/
