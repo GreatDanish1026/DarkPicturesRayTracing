@@ -433,3 +433,6 @@ Leave constants, `FMin` and `5.0 - x` TMax alone. Steps:
   resolution each output pixel gets 16x the rays it gets at 25%, so less history is needed:
   0.3.2 presets use `SpatialResolve.TemporalWeight` 0.9 (High) and 0.85 (Ultra). _Pending
   in-game test._
+- 0.3.3: **RT shadows with spot lights on shadow maps "looks good"** (user test, The Devil in
+  Me), so the setting leaves "experimental": the overlay section is now "Shadows", open by
+  default. Turning RT shadows on still ticks "Spot lights on shadow maps" with it.

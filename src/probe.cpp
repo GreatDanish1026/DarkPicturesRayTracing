@@ -490,12 +490,16 @@ void DefineSettings() {
         {"Ambient occlusion", L"r.RayTracing.AmbientOcclusion.EnableTwoSidedGeometry", "Two-sided geometry", nullptr,
          Kind::Toggle, 1},
 
-        // Shadows: parked (docs/FINDINGS.md). Spot lights carry the game's key lighting and
-        // lose prop shadows (the mannequin's hat) under RT, so they stay on shadow maps.
-        {"Shadows (experimental)", L"r.RayTracing.Shadows", "Ray traced shadows",
-         "Experimental: props such as hats can lose their shadows under RT.", Kind::Toggle, 1},
-        {"Shadows (experimental)", L"r.RayTracing.Shadows.Lights.Spot", "Spot lights on shadow maps",
-         "Recommended with RT shadows: the game's key lights are spot lights.", Kind::Toggle, 0},
+        // Shadows: RT for point, rect and directional lights; spot lights stay on shadow maps
+        // (docs/FINDINGS.md). They carry the game's key lighting and lose prop shadows
+        // (the mannequin's hat) under RT. Tested to look good this way.
+        {"Shadows", L"r.RayTracing.Shadows", "Ray traced shadows",
+         "Ray traced shadows for the game's lights. Turning this on also puts spot lights on shadow maps.",
+         Kind::Toggle, 1},
+        {"Shadows", L"r.RayTracing.Shadows.Lights.Spot", "Spot lights on shadow maps",
+         "Recommended. The game's key lights are spot lights; with RT shadows some props (such as hats) lose "
+         "their shadows from them.",
+         Kind::Toggle, 0},
 
         // Diagnostics: session-only test switches from the shadow investigation.
         {"Diagnostics", L"r.RayTracing.Shadows.Lights.Point", "Point lights on shadow maps", nullptr, Kind::Toggle, 0, 1,
@@ -675,7 +679,7 @@ void SaveSettings() {
 
 void ApplyPreset(const Preset& p) {
     for (Setting& s : g_settings) {
-        if (!s.persist || strcmp(s.group, "Shadows (experimental)") == 0) continue;  // presets leave shadows alone
+        if (!s.persist || strcmp(s.group, "Shadows") == 0) continue;  // presets leave shadows alone
         s.overridden = false;
         for (auto& [cvar, v] : p.values)
             if (wcscmp(cvar, s.cvar) == 0) {
@@ -1267,7 +1271,7 @@ void DrawOverlay(effect_runtime*) {
 
     DrawGroup("Reflections", true);
     DrawGroup("Ambient occlusion", true);
-    DrawGroup("Shadows (experimental)", false);
+    DrawGroup("Shadows", true);
     DrawDiagnostics();
     ImGui::Separator();
     ImGui::TextDisabled("Overrides are saved in ReShade.ini [" DPRT_PRODUCT "] and applied at start.");

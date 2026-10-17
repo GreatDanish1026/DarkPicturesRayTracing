@@ -18,7 +18,7 @@ or run `.\build.ps1 -Install`.
 ## Use
 Open ReShade (Home), go to the **DarkPicturesRT** tab.
 
-- **Presets** change reflections and AO; RT shadows stay as you set them.
+- **Presets** change reflections and AO; shadows stay as you set them.
   - *Game default*: everything back to the game's values.
   - *Sharper reflections*: the game's reflection algorithm at 50% resolution (the game uses 25%).
   - *High*: the game's algorithm at full resolution, history weight 0.9 (game 0.95) to cut smearing.
@@ -29,9 +29,10 @@ Open ReShade (Home), go to the **DarkPicturesRT** tab.
 - **Reflections** and **Ambient occlusion**: individual settings. A setting shows
   the game's value until you override it (combo box choice, or the checkbox next to
   a slider). Hover for help.
-- **Shadows (experimental)**: ray-traced shadows. Turning them on also puts spot
-  lights back on shadow maps, because the game's key lights are spot lights and
-  props such as hats lose their shadows under RT (see FINDINGS).
+- **Shadows**: ray-traced shadows for the game's lights. Turning them on also puts
+  spot lights on shadow maps (recommended): the game's key lights are spot lights,
+  and with RT shadows some props, such as hats, lose their shadows from them (see
+  FINDINGS).
 - **Diagnostics**: test switches and logging from the investigation.
 
 Overrides are saved in `ReShade.ini`, section `[DarkPicturesRT]`, and applied at
@@ -39,7 +40,7 @@ start. Overridden values outrank the game's menu, so the menu can't change them
 until you set them back to "Game".
 
 ### RT shadow shader fix (optional)
-With RT shadows on, a light fixture around a spot light can block its shadow rays.
+With RT shadows on for spot lights, a light fixture around the light can block its shadow rays.
 The add-on can replace UE's shadow ray shader with one that stops rays short of the
 light: put patched libraries in `DarkPicturesRT_shaders\` next to the exe. Generate
 them on your machine from the add-on's dumps with `tools\patch_tmax.py` (see its
