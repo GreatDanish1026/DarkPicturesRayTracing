@@ -512,3 +512,6 @@ investigation tools behind "Show diagnostics"; both choices are saved (`ShowAdva
   ~290 ms with it set (through Engine.ini). The rest (~230 ms with all RT off) is the scene load itself.
   In that scene this add-on's settings at the time (GI final gather, RT shadows, reflections at 100%)
   cost ~40% frame rate: 40-50 real fps against 78 without the add-on.
+- 0.5.5: "Build RT shaders in the background" is **on by default** (user's choice). `Setting::onByDefault`
+  forces it when ReShade.ini has no value for it; unticking saves "game", which keeps it off. "Reset all"
+  also turns it off, like every other override.

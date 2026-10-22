@@ -429,6 +429,7 @@ struct Setting {
     float min = 0, max = 1;  // Int / Float range; Toggle: the value forced while ticked
     std::vector<Choice> choices = {};
     bool persist = true;  // diagnostics are session-only
+    bool onByDefault = false;  // forced (to min) until the user turns it off; "game" in the ini keeps it off
 
     bool overridden = false;  // the user wants this cvar forced
     float value = 0;          // to this value
@@ -549,11 +550,11 @@ void DefineSettings() {
         // needs it, and waits for it. At a Devil in Me scene start that's ~220 pipelines in one
         // second and a 550 ms frame; building them in the background (missing shaders draw
         // black in RT effects meanwhile) roughly halved it (DarkPicturesDLSS docs/FINDINGS.md,
-        // 2026-10-22). Not in presets.
+        // 2026-10-22). On by default; not in presets.
         {"Performance", L"r.RayTracing.NonBlockingPipelineCreation", "Build RT shaders in the background",
          "Fewer stutters when a scene starts: new ray tracing shaders are built without stopping the game. Until "
          "one is ready, ray traced effects can briefly show black or missing on the surfaces that need it.",
-         Kind::Toggle, 1},
+         Kind::Toggle, 1, 1, {}, true, true},
 
         // Diagnostics: session-only test switches from the shadow investigation.
         {"Diagnostics", L"r.RayTracing.Shadows.Lights.Point", "Point lights on shadow maps", nullptr, Kind::Toggle, 0, 1,
@@ -715,9 +716,14 @@ void LoadSettings() {
         if (!s.persist) continue;
         char value[32] = "";
         size_t size = sizeof(value);
-        if (!reshade::get_config_value(nullptr, DPRT_PRODUCT, Narrow(s.cvar).c_str(), value, &size) || !value[0] ||
-            strcmp(value, "game") == 0)
+        if (!reshade::get_config_value(nullptr, DPRT_PRODUCT, Narrow(s.cvar).c_str(), value, &size) || !value[0]) {
+            if (s.onByDefault) {  // never saved: its default
+                s.overridden = true;
+                s.value = s.min;
+            }
             continue;
+        }
+        if (strcmp(value, "game") == 0) continue;
         s.overridden = true;
         s.value = static_cast<float>(atof(value));
         ++loaded;
