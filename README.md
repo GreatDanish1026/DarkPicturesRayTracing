@@ -35,6 +35,10 @@ Open ReShade (Home), go to the **DarkPicturesRT** tab. The tab opens in a simple
 - **Global illumination**: Off, or final gather (ray traced bounce light, with firefly
   suppression and filter width 2, which make it clean).
 - **Ray traced sky light**: for outdoor scenes (noisy indoors).
+- **Build RT shaders in the background**: fewer stutters when a scene starts. The game
+  otherwise stops to build new ray tracing shaders (in The Devil in Me, ~220 at a scene
+  start); with this on they're built alongside, and until one is ready the ray traced
+  effects on the surfaces that need it can briefly show black or missing.
 - A count of changed settings, with **Reset all** (asks for a second click).
 
 **Show advanced settings** opens every setting individually (reflections, translucency,

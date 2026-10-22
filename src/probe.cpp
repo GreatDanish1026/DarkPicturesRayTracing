@@ -545,6 +545,16 @@ void DefineSettings() {
         {"Experimental", L"r.RayTracing.SkyLight.SamplesPerPixel", "Sky light: samples per pixel", nullptr, Kind::Int, 1,
          8},
 
+        // Performance: UE builds a ray tracing pipeline the first time an effect or material
+        // needs it, and waits for it. At a Devil in Me scene start that's ~220 pipelines in one
+        // second and a 550 ms frame; building them in the background (missing shaders draw
+        // black in RT effects meanwhile) roughly halved it (DarkPicturesDLSS docs/FINDINGS.md,
+        // 2026-10-22). Not in presets.
+        {"Performance", L"r.RayTracing.NonBlockingPipelineCreation", "Build RT shaders in the background",
+         "Fewer stutters when a scene starts: new ray tracing shaders are built without stopping the game. Until "
+         "one is ready, ray traced effects can briefly show black or missing on the surfaces that need it.",
+         Kind::Toggle, 1},
+
         // Diagnostics: session-only test switches from the shadow investigation.
         {"Diagnostics", L"r.RayTracing.Shadows.Lights.Point", "Point lights on shadow maps", nullptr, Kind::Toggle, 0, 1,
          {}, false},
@@ -1461,6 +1471,13 @@ void DrawSimple() {
         if (SwitchRow("Ray traced sky light", &sky, "outdoor scenes",
                       "Occlusion of sky lighting. Looks good outdoors; indoors it is very noisy."))
             SetOverride(L"r.RayTracing.SkyLight", sky, 1);
+
+        bool background = IsOn(L"r.RayTracing.NonBlockingPipelineCreation", 1);
+        if (SwitchRow("Build RT shaders in the background", &background, "fewer scene-start stutters",
+                      "New ray tracing shaders are built without stopping the game, so scene starts stutter less. "
+                      "Until one is ready, ray traced effects can briefly show black or missing on the surfaces "
+                      "that need it."))
+            SetOverride(L"r.RayTracing.NonBlockingPipelineCreation", background, 1);
         ImGui::EndTable();
     }
 
@@ -1507,6 +1524,7 @@ void DrawOverlay(effect_runtime*) {
         DrawGroup("Ambient occlusion", true);
         DrawGroup("Shadows", true);
         DrawGroup("Global illumination", true);
+        DrawGroup("Performance", true);
         DrawGroup("Experimental", false);
         ImGui::Separator();
         if (ImGui::Checkbox("Show diagnostics", &g_showDiagnostics))

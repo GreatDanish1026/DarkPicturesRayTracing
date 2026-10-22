@@ -505,3 +505,10 @@ investigation tools behind "Show diagnostics"; both choices are saved (`ShowAdva
   (they only manage reflections and AO). It's a manual switch with a warning ("glass; can break
   fog"). The per-game preset rule table went with it; relative preset values stay. Little Hope's
   saved translucency override was reset to "game"; The Devil in Me's was left on (the user's choice).
+- 0.5.4: **"Build RT shaders in the background"** (`r.RayTracing.NonBlockingPipelineCreation`, a bool
+  cvar, so it's forced through `Set`), in the simple view and in a new "Performance" group; not in
+  presets. Measured from DarkPicturesDLSS on 2026-10-22 (its docs/FINDINGS.md): at a Devil in Me scene
+  start the game creates ~221 RT pipelines in one second, and the worst frame went from 553 ms to
+  ~290 ms with it set (through Engine.ini). The rest (~230 ms with all RT off) is the scene load itself.
+  In that scene this add-on's settings at the time (GI final gather, RT shadows, reflections at 100%)
+  cost ~40% frame rate: 40-50 real fps against 78 without the add-on.
