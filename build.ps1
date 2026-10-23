@@ -1,9 +1,12 @@
 # Builds bin\DarkPicturesRT.addon64 with MSVC (Visual Studio 2022+ with C++ tools).
 # MSVC is required: ReShade is built with it, and MinGW returns API structs
 # differently, which crashes inside ReShade.
-# Usage: .\build.ps1 [-Install] [-GameBin <folder of the game's shipping exe>]
+# Usage: .\build.ps1 [-Install] [-Package] [-GameBin <folder of the game's shipping exe>]
+#   -Package  makes bin\release\DarkPicturesRT-<version>.zip: the add-on, README, LICENSE and
+#             THIRD_PARTY_NOTICES.txt (no patched shaders: those are made from the game's own)
 param(
     [switch]$Install,
+    [switch]$Package,
     [string]$GameBin = "E:\SteamLibrary\steamapps\common\The Dark Pictures Anthology - The Devil In Me\SMG028\Binaries\Win64"
 )
 $ErrorActionPreference = 'Stop'
@@ -64,4 +67,17 @@ if ($Install) {
     if (Get-Process ([IO.Path]::GetFileNameWithoutExtension($exe)) -ErrorAction SilentlyContinue) { throw "Close the game first." }
     Copy-Item $addon $GameBin -Force
     Write-Host "Installed $name to $GameBin"
+}
+
+if ($Package) {
+    $version = (Get-Item $addon).VersionInfo.FileVersion  # DPRT_VERSION from src\version.h
+    $stage = "$root\bin\release\$name-$version"
+    if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
+    New-Item -ItemType Directory -Force $stage | Out-Null
+    Copy-Item $addon, "$root\README.md", "$root\LICENSE", "$root\THIRD_PARTY_NOTICES.txt" $stage
+    $zip = "$root\bin\release\$name-$version.zip"
+    if (Test-Path $zip) { Remove-Item -Force $zip }
+    Compress-Archive -Path "$stage\*" -DestinationPath $zip
+    Write-Host "Packaged $zip"
+    Get-ChildItem $stage -File | ForEach-Object { "{0,-32} {1,-10} {2,10:N0}" -f $_.Name, $_.VersionInfo.FileVersion, $_.Length }
 }

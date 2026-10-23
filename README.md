@@ -7,13 +7,13 @@ compiled in. The game's menu only offers ray-traced reflections. This add-on
 exposes the rest through the engine's console variables, live, from a ReShade
 overlay tab.
 
-**Status: 0.5.3.** Tested in The Devil in Me, House of Ashes, Little Hope and Man of Medan. See [docs/FINDINGS.md](docs/FINDINGS.md)
+**Version 1.0.0.** Tested in The Devil in Me, House of Ashes, Little Hope and Man of Medan. See [docs/FINDINGS.md](docs/FINDINGS.md)
 for how it works and what was found along the way.
 
 ## Install
 Needs ReShade 6.8+ *with full add-on support*. Start the game with `-dx12`.
-Copy `bin\DarkPicturesRT.addon64` next to the game's `*-Win64-Shipping.exe`,
-or run `.\build.ps1 -Install`.
+Copy `DarkPicturesRT.addon64` (from the release zip, or `bin\` after building) next to
+the game's `*-Win64-Shipping.exe`, or run `.\build.ps1 -Install`.
 
 ## Use
 Open ReShade (Home), go to the **DarkPicturesRT** tab. The tab opens in a simple view:
@@ -58,7 +58,8 @@ them on your machine from the add-on's dumps with `tools\patch_tmax.py` (see its
 help). They're derived from the game's own shaders, so they aren't distributed here.
 
 ## Build
-Visual Studio 2022+ with the C++ x64 tools and the Windows 10/11 SDK: `.\build.ps1`.
+Visual Studio 2022+ with the C++ x64 tools and the Windows 10/11 SDK: `.\build.ps1`
+(`-Package` also makes `bin\release\DarkPicturesRT-<version>.zip`).
 Builds the add-on plus `bin\dxilasm.exe` (DXIL assembler/signer) and
 `bin\d3d12probe.exe` (checks the hooked D3D12 vtable slot).
 

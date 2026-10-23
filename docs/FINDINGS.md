@@ -515,3 +515,6 @@ investigation tools behind "Show diagnostics"; both choices are saved (`ShowAdva
 - 0.5.5: "Build RT shaders in the background" is **on by default** (user's choice). `Setting::onByDefault`
   forces it when ReShade.ini has no value for it; unticking saves "game", which keeps it off. "Reset all"
   also turns it off, like every other override.
+- **1.0.0 (2026-10-23):** 0.5.5 plus a `-Package` step in build.ps1 (`bin\release\DarkPicturesRT-<version>.zip`:
+  the add-on, README, LICENSE, THIRD_PARTY_NOTICES.txt; no patched shaders, which are derived from the
+  game's own). Tagged `v1.0.0`.
